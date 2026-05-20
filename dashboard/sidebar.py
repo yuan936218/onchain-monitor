@@ -25,6 +25,27 @@ def render_sidebar():
             import os
             os.environ["ETHERSCAN_API_KEY"] = etherscan_key
 
+        if st.button("🧪 测试 API Key", help="验证 Etherscan API Key 是否有效"):
+            if etherscan_key:
+                import httpx
+                from collectors.base import make_client
+                try:
+                    client = make_client(timeout=15)
+                    resp = client.get("https://api.etherscan.io/api", params={
+                        "module": "proxy", "action": "eth_blockNumber",
+                        "apikey": etherscan_key,
+                    })
+                    data = resp.json()
+                    if data.get("result") and data["result"].startswith("0x"):
+                        block = int(data["result"], 16)
+                        st.success(f"✅ API Key 有效！当前区块: {block:,}")
+                    else:
+                        st.error(f"❌ API 返回异常: {data.get('message', data.get('result', '未知错误'))}")
+                except Exception as e:
+                    st.error(f"❌ 连接失败: {str(e)[:200]}")
+            else:
+                st.warning("请先输入 API Key")
+
         feishu_url = st.text_input(
             "飞书 Webhook URL",
             type="password",

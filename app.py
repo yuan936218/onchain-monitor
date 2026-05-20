@@ -93,12 +93,24 @@ def setup_scheduler():
 
     def collect_all():
         api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
+        result = {"etherscan": None, "defillama": None, "alerts": 0, "error": None}
         if api_ok:
-            collector.safe_collect()
-            evaluate_all_rules()
+            ok = collector.safe_collect()
+            if ok:
+                result["etherscan"] = "success"
+                result["alerts"] = evaluate_all_rules()
+            else:
+                result["etherscan"] = "failed"
+                result["error"] = "Etherscan API 调用失败，请检查 API Key 是否正确"
+        else:
+            result["etherscan"] = "skipped"
+            result["error"] = "未配置 Etherscan API Key，请在侧边栏输入"
+        if defillama_collector.safe_collect():
+            result["defillama"] = "success"
         whale_collector.safe_collect()
-        defillama_collector.safe_collect()
         coingecko_collector.safe_collect()
+        st.session_state["last_collect_result"] = result
+        st.session_state["last_collect_time"] = datetime.utcnow()
 
     def daily_cleanup():
         from database.connection import get_session
@@ -165,6 +177,23 @@ def main():
     col2.metric("未读警报", alert_count)
     col3.metric("监控地址数", get_session().query(MonitoredAddress).filter(MonitoredAddress.is_active == True).count())
     col4.metric("API配置", f"Etherscan: {'✓ 已配置' if api_ok else '✗ 未配置'}")
+
+    # Show collection status (if collector is running)
+    if running:
+        last_result = st.session_state.get("last_collect_result")
+        last_time = st.session_state.get("last_collect_time")
+        if last_time:
+            elapsed = (datetime.utcnow() - last_time).total_seconds()
+            if last_result and last_result.get("error"):
+                st.error(f"⚠️ 采集异常: {last_result['error']}")
+            elif last_result and last_result.get("etherscan") == "success":
+                st.success(f"✅ 数据采集正常 (最近更新: {elapsed:.0f}秒前)")
+            elif last_result and last_result.get("etherscan") == "failed":
+                st.error(f"❌ Etherscan 连接失败，请确认 API Key 有效")
+            else:
+                st.info(f"⏳ 等待首次采集... ({elapsed:.0f}秒前开始)")
+        else:
+            st.info("⏳ 等待首次采集...")
 
     st.divider()
 

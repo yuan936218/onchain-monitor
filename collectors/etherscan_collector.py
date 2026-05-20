@@ -249,11 +249,14 @@ class EtherscanCollector(BaseCollector):
             "api_errors": api_errors,
         }
 
-    def collect(self):
+    def collect(self, chains=None):
         if not _get_api_key():
             logger.warning("[etherscan] No API key configured, skipping")
             self.last_error = "No API key configured"
             return
+
+        if chains is None:
+            chains = SUPPORTED_CHAINS
 
         session = get_session()
 
@@ -264,7 +267,7 @@ class EtherscanCollector(BaseCollector):
         total_api_errors = 0
         failed_chains = []
 
-        for chain in SUPPORTED_CHAINS:
+        for chain in chains:
             try:
                 stats = self._collect_chain(chain, session)
                 all_chain_stats.append(stats)
@@ -281,7 +284,7 @@ class EtherscanCollector(BaseCollector):
         session.commit()
 
         self.last_stats = {
-            "chains": len(SUPPORTED_CHAINS),
+            "chains": len(chains),
             "total_addresses": sum(s["addresses"] for s in all_chain_stats),
             "chain_details": all_chain_stats,
             "total_new_transfers": total_transfers,
@@ -290,4 +293,4 @@ class EtherscanCollector(BaseCollector):
             "total_api_errors": total_api_errors,
         }
         self.last_error = "; ".join(failed_chains) if failed_chains else None
-        logger.info(f"[etherscan] Collected {total_transfers} transfers + {total_whale_moves} whale moves across {len(SUPPORTED_CHAINS)} chains")
+        logger.info(f"[etherscan] Collected {total_transfers} transfers + {total_whale_moves} whale moves across {len(chains)} chains")

@@ -96,7 +96,7 @@ def setup_scheduler(run_sync_first=True):
         result = {"etherscan": None, "defillama": None, "alerts": 0, "error": None, "stats": None}
         if api_ok:
             try:
-                collector.collect()
+                collector.collect(chains=["ethereum"])
                 result["etherscan"] = "success"
                 result["stats"] = collector.last_stats
                 result["alerts"] = evaluate_all_rules()

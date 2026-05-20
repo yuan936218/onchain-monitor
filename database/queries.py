@@ -48,25 +48,25 @@ def get_24h_aggregates():
 
     if exchange_addrs:
         inflow = session.query(func.sum(StablecoinTransfer.value_usd)).filter(
-            StablecoinTransfer.block_timestamp >= since,
+            StablecoinTransfer.detected_at >= since,
             StablecoinTransfer.to_address.in_(exchange_addrs),
         ).scalar() or 0
 
         outflow = session.query(func.sum(StablecoinTransfer.value_usd)).filter(
-            StablecoinTransfer.block_timestamp >= since,
+            StablecoinTransfer.detected_at >= since,
             StablecoinTransfer.from_address.in_(exchange_addrs),
         ).scalar() or 0
 
         large_tx_count = session.query(StablecoinTransfer).filter(
             and_(
-                StablecoinTransfer.block_timestamp >= since,
+                StablecoinTransfer.detected_at >= since,
                 StablecoinTransfer.value_usd >= 1_000_000,
             )
         ).count()
 
     mint_count = session.query(MintBurnEvent).filter(
         and_(
-            MintBurnEvent.block_timestamp >= since,
+            MintBurnEvent.detected_at >= since,
             MintBurnEvent.event_type == "mint",
         )
     ).count()
@@ -86,7 +86,7 @@ def get_large_transfers(hours=24, min_value_usd=1_000_000, token_filter=None):
 
     q = session.query(StablecoinTransfer).filter(
         and_(
-            StablecoinTransfer.block_timestamp >= since,
+            StablecoinTransfer.detected_at >= since,
             StablecoinTransfer.value_usd >= min_value_usd,
         )
     )
@@ -112,14 +112,14 @@ def get_exchange_flow_timeseries(hours=24):
         return []
 
     transfers = session.query(StablecoinTransfer).filter(
-        StablecoinTransfer.block_timestamp >= since
+        StablecoinTransfer.detected_at >= since
     ).all()
 
     # Group by hour, matching against exchange address list directly
     hourly = {}
     exchange_set = set(exchange_addrs)
     for t in transfers:
-        hour_key = t.block_timestamp.replace(minute=0, second=0, microsecond=0)
+        hour_key = t.detected_at.replace(minute=0, second=0, microsecond=0)
         if hour_key not in hourly:
             hourly[hour_key] = {"inflow": 0, "outflow": 0}
         if t.to_address in exchange_set:
@@ -137,7 +137,7 @@ def get_whale_movements(hours=24):
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=hours)
     return session.query(WhaleMovement).filter(
-        WhaleMovement.block_timestamp >= since
+        WhaleMovement.detected_at >= since
     ).order_by(WhaleMovement.value_usd.desc()).all()
 
 
@@ -145,8 +145,8 @@ def get_recent_mint_burns(hours=24):
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=hours)
     return session.query(MintBurnEvent).filter(
-        MintBurnEvent.block_timestamp >= since
-    ).order_by(MintBurnEvent.block_timestamp.desc()).all()
+        MintBurnEvent.detected_at >= since
+    ).order_by(MintBurnEvent.detected_at.desc()).all()
 
 
 def get_active_monitored_addresses(category=None):

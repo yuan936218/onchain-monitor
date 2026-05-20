@@ -4,7 +4,6 @@ import streamlit as st
 import pandas as pd
 from database.queries import get_large_transfers
 from utils.formatters import format_usd, format_token_amount, format_timestamp, format_address
-from config.settings import STABLECOIN_TOKENS
 
 
 def render_transfer_table():

@@ -6,12 +6,10 @@ import os
 import time
 import logging
 from datetime import datetime, timedelta
-from threading import Lock
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 import streamlit as st
-import pandas as pd
 
 # Page config must be the first Streamlit call
 st.set_page_config(
@@ -155,23 +153,20 @@ def setup_scheduler(run_sync_first=True):
         st.session_state["last_collect_time"] = datetime.utcnow()
 
     def daily_cleanup():
-        from database.connection import get_session
+        from database.connection import get_session, engine
         from database.models import StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert
         retention = st.session_state.get("retention_days", 90)
         cutoff = datetime.utcnow() - timedelta(days=retention)
         session = get_session()
         for model in [StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert]:
-            deleted = session.query(model).filter(model.block_timestamp < cutoff).delete()
+            deleted = session.query(model).filter(model.detected_at < cutoff).delete()
             if deleted:
                 logging.info(f"[cleanup] Deleted {deleted} old {model.__tablename__} records")
         session.commit()
+        session.close()
         # Vacuum to reclaim disk space
-        from database.connection import engine
-        import sqlite3
-        db_path = os.path.join(os.path.dirname(__file__), "data", "onchain_monitor.db")
-        conn = sqlite3.connect(db_path)
-        conn.execute("VACUUM")
-        conn.close()
+        with engine.connect() as conn:
+            conn.exec_driver_sql("VACUUM")
 
     scheduler = BackgroundScheduler()
     interval = st.session_state.get("poll_interval", 120)

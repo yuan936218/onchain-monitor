@@ -57,12 +57,12 @@ def get_24h_aggregates():
             StablecoinTransfer.from_address.in_(exchange_addrs),
         ).scalar() or 0
 
-        large_tx_count = session.query(StablecoinTransfer).filter(
-            and_(
-                StablecoinTransfer.detected_at >= since,
-                StablecoinTransfer.value_usd >= 1_000_000,
-            )
-        ).count()
+    large_tx_count = session.query(StablecoinTransfer).filter(
+        and_(
+            StablecoinTransfer.detected_at >= since,
+            StablecoinTransfer.value_usd >= 1_000_000,
+        )
+    ).count()
 
     mint_count = session.query(MintBurnEvent).filter(
         and_(

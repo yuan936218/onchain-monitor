@@ -12,12 +12,25 @@ from config.settings import (
 from sqlalchemy import func, and_
 
 
+def _get_threshold(key: str, default: float) -> float:
+    """Get threshold from Streamlit session state (sidebar) or config default."""
+    try:
+        import streamlit as st
+        value = st.session_state.get(key)
+        if value is not None:
+            return float(value)
+    except Exception:
+        pass
+    return float(default)
+
+
 def rule_large_exchange_inflow():
-    """警报：单笔超大额稳定币流入交易所。"""
+    """Alert: large single-tx stablecoin inflow into an exchange (sell pressure signal)."""
+    threshold = _get_threshold("threshold_inflow", THRESHOLD_EXCHANGE_INFLOW)
     session = get_session()
     recent = session.query(StablecoinTransfer).filter(
         and_(
-            StablecoinTransfer.value_usd >= THRESHOLD_EXCHANGE_INFLOW,
+            StablecoinTransfer.value_usd >= threshold,
             StablecoinTransfer.to_label.isnot(None),
             StablecoinTransfer.detected_at >= datetime.utcnow() - timedelta(minutes=10),
         )
@@ -50,11 +63,12 @@ def rule_large_exchange_inflow():
 
 
 def rule_large_transfer():
-    """警报：任意大额转账。"""
+    """Alert: any large transfer above threshold."""
+    threshold = _get_threshold("threshold_large", THRESHOLD_LARGE_TRANSFER)
     session = get_session()
     recent = session.query(StablecoinTransfer).filter(
         and_(
-            StablecoinTransfer.value_usd >= THRESHOLD_LARGE_TRANSFER,
+            StablecoinTransfer.value_usd >= threshold,
             StablecoinTransfer.detected_at >= datetime.utcnow() - timedelta(minutes=10),
         )
     ).all()
@@ -90,18 +104,19 @@ def rule_large_transfer():
 
 
 def rule_exchange_flow_surge():
-    """警报：10分钟内交易所流入总额超阈值。"""
+    """Alert: total exchange inflow exceeds surge threshold within 10 minutes."""
+    threshold = _get_threshold("threshold_inflow", THRESHOLD_EXCHANGE_FLOW_SURGE)
     session = get_session()
     since = datetime.utcnow() - timedelta(minutes=10)
 
     total_inflow = session.query(func.sum(StablecoinTransfer.value_usd)).filter(
         and_(
-            StablecoinTransfer.block_timestamp >= since,
+            StablecoinTransfer.detected_at >= since,
             StablecoinTransfer.to_label.isnot(None),
         )
     ).scalar() or 0
 
-    if total_inflow >= THRESHOLD_EXCHANGE_FLOW_SURGE:
+    if total_inflow >= threshold:
         existing = session.query(Alert).filter(
             and_(
                 Alert.alert_type == "exchange_flow_surge",

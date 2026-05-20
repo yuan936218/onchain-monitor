@@ -32,7 +32,7 @@ def render_sidebar():
                 try:
                     client = make_client(timeout=15)
                     # Test with account/txlist — guaranteed to work with free keys
-                    resp = client.get("https://api.etherscan.io/api", params={
+                    resp = client.get("https://api.etherscan.io/v2/api", params={
                         "chainid": "1",
                         "module": "account",
                         "action": "txlist",

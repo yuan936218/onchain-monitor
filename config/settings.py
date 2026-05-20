@@ -24,7 +24,7 @@ HTTP_PROXY = _get_config("HTTP_PROXY", os.getenv("http_proxy", ""))
 HTTPS_PROXY = _get_config("HTTPS_PROXY", os.getenv("https_proxy", ""))
 
 # Etherscan API
-ETHERSCAN_BASE_URL = _get_config("ETHERSCAN_BASE_URL", "https://api.etherscan.io")
+ETHERSCAN_BASE_URL = _get_config("ETHERSCAN_BASE_URL", "https://api.etherscan.io/v2/api")
 
 # Feishu bot webhook
 FEISHU_WEBHOOK_URL = _get_config("FEISHU_WEBHOOK_URL", "")

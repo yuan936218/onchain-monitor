@@ -1,0 +1,7 @@
+streamlit>=1.42
+sqlalchemy>=2.0
+httpx>=0.28
+python-dotenv>=1.0
+pandas>=2.0
+plotly>=6.0
+apscheduler>=3.11

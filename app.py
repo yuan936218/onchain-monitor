@@ -1,0 +1,223 @@
+"""On-Chain Data Monitoring Dashboard — Main Entry Point."""
+
+import json
+import sys
+import os
+import time
+import logging
+from datetime import datetime, timedelta
+from threading import Lock
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+import streamlit as st
+import pandas as pd
+
+# Page config must be the first Streamlit call
+st.set_page_config(
+    page_title="On-Chain Monitor",
+    page_icon="🔍",
+    layout="wide",
+)
+
+from database.migrations import init_database
+from database.connection import get_session
+from database.models import MonitoredAddress
+from config.settings import ETHERSCAN_API_KEY
+from database.queries import get_unacknowledged_alert_count
+
+# Dashboard components
+from dashboard.sidebar import render_sidebar
+from dashboard.alerts_panel import render_alerts
+from dashboard.metrics_row import render_metrics
+from dashboard.exchange_flow_chart import render_exchange_flow_chart
+from dashboard.transfer_table import render_transfer_table
+from dashboard.mint_burn_timeline import render_mint_burn_timeline
+from dashboard.whale_movements import render_whale_movements
+
+logging.basicConfig(level=logging.INFO)
+
+# Initialize database
+init_database()
+
+
+def seed_addresses():
+    """Seed monitored_addresses table from config/addresses.json."""
+    session = get_session()
+
+    config_path = os.path.join(os.path.dirname(__file__), "config", "addresses.json")
+    with open(config_path, "r") as f:
+        data = json.load(f)
+
+    seeded = 0
+    for chain, categories in data.items():
+        for category, addresses in categories.items():
+            for addr in addresses:
+                exists = session.query(MonitoredAddress).filter(
+                    MonitoredAddress.address == addr["address"].lower()
+                ).first()
+                if exists:
+                    continue
+                session.add(MonitoredAddress(
+                    address=addr["address"].lower(),
+                    label=addr["label"],
+                    category="exchange" if category == "exchanges" else category,
+                    chain=chain,
+                    notes=addr.get("notes", ""),
+                ))
+                seeded += 1
+
+    session.commit()
+    if seeded > 0:
+        return seeded
+    return 0
+
+
+# Seed on first run
+seed_addresses()
+
+
+def setup_scheduler():
+    """Configure and start the APScheduler background collectors."""
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from collectors.etherscan_collector import EtherscanCollector
+    from collectors.whale_alert_collector import WhaleAlertCollector
+    from collectors.defillama_collector import DefiLlamaCollector
+    from collectors.coingecko_collector import CoinGeckoCollector
+    from alerts.engine import evaluate_all_rules
+
+    collector = EtherscanCollector()
+    whale_collector = WhaleAlertCollector()
+    defillama_collector = DefiLlamaCollector()
+    coingecko_collector = CoinGeckoCollector()
+
+    def collect_all():
+        api_ok = bool(ETHERSCAN_API_KEY or os.getenv("ETHERSCAN_API_KEY"))
+        if api_ok:
+            collector.safe_collect()
+            evaluate_all_rules()
+        whale_collector.safe_collect()
+        defillama_collector.safe_collect()
+        coingecko_collector.safe_collect()
+
+    def daily_cleanup():
+        from database.connection import get_session
+        from database.models import StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert
+        retention = st.session_state.get("retention_days", 90)
+        cutoff = datetime.utcnow() - timedelta(days=retention)
+        session = get_session()
+        for model in [StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert]:
+            deleted = session.query(model).filter(model.block_timestamp < cutoff).delete()
+            if deleted:
+                logging.info(f"[cleanup] Deleted {deleted} old {model.__tablename__} records")
+        session.commit()
+        # Vacuum to reclaim disk space
+        from database.connection import engine
+        import sqlite3
+        db_path = os.path.join(os.path.dirname(__file__), "data", "onchain_monitor.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute("VACUUM")
+        conn.close()
+
+    scheduler = BackgroundScheduler()
+    interval = st.session_state.get("poll_interval", 120)
+    scheduler.add_job(collect_all, "interval", seconds=interval, id="collector_job")
+    scheduler.add_job(daily_cleanup, "interval", hours=24, id="cleanup_job")
+    scheduler.start()
+    return scheduler, collector
+
+
+def main():
+    st.title("🔍 On-Chain Data Monitor")
+    st.caption("Track stablecoin flows, whale movements, and market-moving events")
+
+    # Sidebar
+    render_sidebar()
+
+    # Initialize session state
+    if "scheduler" not in st.session_state:
+        st.session_state["scheduler"] = None
+    if "last_refresh" not in st.session_state:
+        st.session_state["last_refresh"] = time.time()
+
+    # Start/stop collector
+    if st.session_state.get("collector_running", False):
+        if st.session_state["scheduler"] is None:
+            scheduler, collector = setup_scheduler()
+            st.session_state["scheduler"] = scheduler
+            st.toast("✅ Data collector started!")
+    else:
+        if st.session_state["scheduler"] is not None:
+            st.session_state["scheduler"].shutdown(wait=False)
+            st.session_state["scheduler"] = None
+            st.toast("⏸️ Data collector stopped")
+
+    # Status bar
+    api_ok = bool(ETHERSCAN_API_KEY or os.getenv("ETHERSCAN_API_KEY"))
+    running = st.session_state.get("collector_running", False)
+    status_color = "🟢" if (api_ok and running) else "🟡" if api_ok else "🔴"
+    status_text = "Collecting" if (api_ok and running) else "Ready (API OK)" if api_ok else "API Key Needed"
+
+    alert_count = get_unacknowledged_alert_count()
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Status", f"{status_color} {status_text}")
+    col2.metric("Unacknowledged Alerts", alert_count)
+    col3.metric("Monitored Addresses", get_session().query(MonitoredAddress).filter(MonitoredAddress.is_active == True).count())
+    col4.metric("API Keys", f"Etherscan: {'✓' if api_ok else '✗'}")
+
+    st.divider()
+
+    # Main dashboard layout
+    # Row 1: Alerts
+    render_alerts()
+
+    st.divider()
+
+    # Row 2: Key metrics
+    render_metrics()
+
+    st.divider()
+
+    # Row 3: Exchange flow chart + Transfer table
+    col_chart, col_table = st.columns([6, 5])
+    with col_chart:
+        render_exchange_flow_chart()
+    with col_table:
+        render_transfer_table()
+
+    st.divider()
+
+    # Row 4: Mint/burn + Whale movements
+    col_mint, col_whale = st.columns(2)
+    with col_mint:
+        render_mint_burn_timeline()
+    with col_whale:
+        render_whale_movements()
+
+    # Auto-refresh countdown
+    poll_interval = st.session_state.get("poll_interval", 120)
+    elapsed = time.time() - st.session_state.get("last_refresh", time.time())
+    next_refresh = max(0, poll_interval - elapsed)
+
+    with st.sidebar:
+        st.divider()
+        st.caption(f"Next auto-refresh in: {next_refresh:.0f}s")
+        if st.button("🔄 Refresh Dashboard"):
+            st.session_state["last_refresh"] = time.time()
+            st.rerun()
+
+    # Auto-refresh if collector is running
+    if running and next_refresh <= 0:
+        st.session_state["last_refresh"] = time.time()
+        time.sleep(0.5)
+        st.rerun()
+
+    # Periodic refresh if collector is not running
+    if not running:
+        time.sleep(poll_interval)
+        st.rerun()
+
+
+if __name__ == "__main__":
+    main()

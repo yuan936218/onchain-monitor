@@ -1,0 +1,10 @@
+.env
+data/onchain_monitor.db
+data/onchain_monitor.db-wal
+data/onchain_monitor.db-shm
+__pycache__/
+*.pyc
+.streamlit/
+*.egg-info/
+dist/
+build/

@@ -9,7 +9,7 @@ def render_metrics():
     st.subheader("📊 关键指标 (最近24小时)")
 
     # ── Debug: show actual database state ──
-    with st.expander("🔧 数据库诊断", expanded=False):
+    with st.expander("🔧 数据库诊断 (点击展开)", expanded=True):
         from database.connection import get_session
         from database.models import StablecoinTransfer, Alert, MonitoredAddress
         from sqlalchemy import func

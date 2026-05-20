@@ -75,6 +75,16 @@ def _migrate_alerts_add_chain():
 
 
 def init_database():
-    Base.metadata.create_all(engine)
-    _migrate_monitored_addresses()
-    _migrate_alerts_add_chain()
+    import time
+    for attempt in range(5):
+        try:
+            Base.metadata.create_all(engine)
+            _migrate_monitored_addresses()
+            _migrate_alerts_add_chain()
+            return
+        except Exception as e:
+            if attempt < 4:
+                logger.warning(f"[migrations] Attempt {attempt + 1} failed ({e}), retrying...")
+                time.sleep(3)
+            else:
+                raise

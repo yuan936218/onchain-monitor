@@ -15,6 +15,11 @@
 7. **`large_tx_count` was inside `if exchange_addrs:` block** in `get_24h_aggregates()` — wouldn't count large txs when 0 exchange addresses. Fixed.
 8. **`resolve_label` had `@lru_cache`** — thread-safety issue with SQLAlchemy sessions. Replaced with plain dict cache.
 
+## Latest changes (2026-05-20, commit 9631e1a)
+9. **Mint/burn auto-detection** — collector detects mint (from 0x0000...0) and burn (to 0x0000...0) in the same transfer loop, creates `MintBurnEvent` records immediately.
+10. **Whale panel fallback** — when `WhaleMovement` table is empty, the whale panel falls back to querying `StablecoinTransfer` for transfers >$10M (72h window) as inferred whale activity.
+11. **Sidebar redesigned** — removed manual start/stop button. Replaced with small pause/resume toggle at top, status indicator (🟢 运行中 / ⏸️ 已暂停), test & diagnostic buttons side by side. Footer: "链上监控 v1.0 · 自动采集".
+
 ## Architecture key points
 - **Etherscan V2 API** requires `chainid=1` param and `/v2/api` URL path (NOT `/api`)
 - **`account/tokentx`** is the endpoint the collector uses (different from `account/txlist` used by the test button)

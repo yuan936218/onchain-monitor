@@ -77,7 +77,7 @@ def seed_addresses():
 seed_addresses()
 
 
-def setup_scheduler():
+def setup_scheduler(run_sync_first=True):
     """Configure and start the APScheduler background collectors."""
     from apscheduler.schedulers.background import BackgroundScheduler
     from collectors.etherscan_collector import EtherscanCollector
@@ -91,13 +91,55 @@ def setup_scheduler():
     defillama_collector = DefiLlamaCollector()
     coingecko_collector = CoinGeckoCollector()
 
+    # Run one synchronous collection first to surface any errors immediately
+    if run_sync_first:
+        api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
+        result = {"etherscan": None, "defillama": None, "alerts": 0, "error": None, "stats": None}
+        if api_ok:
+            try:
+                collector.collect()
+                result["etherscan"] = "success"
+                result["stats"] = collector.last_stats
+                result["alerts"] = evaluate_all_rules()
+                st.session_state["last_collect_result"] = result
+                st.session_state["last_collect_time"] = datetime.utcnow()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                result["etherscan"] = "failed"
+                result["error"] = f"采集异常: {str(e)[:500]}"
+                result["stats"] = collector.last_stats
+                st.session_state["last_collect_result"] = result
+                st.session_state["last_collect_time"] = datetime.utcnow()
+        else:
+            result["etherscan"] = "skipped"
+            result["error"] = "未配置 Etherscan API Key，请在侧边栏输入"
+            st.session_state["last_collect_result"] = result
+            st.session_state["last_collect_time"] = datetime.utcnow()
+
+        # Run other collectors
+        try:
+            if defillama_collector.safe_collect():
+                result["defillama"] = "success"
+        except Exception:
+            pass
+        try:
+            whale_collector.safe_collect()
+        except Exception:
+            pass
+        try:
+            coingecko_collector.safe_collect()
+        except Exception:
+            pass
+
     def collect_all():
         api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
-        result = {"etherscan": None, "defillama": None, "alerts": 0, "error": None}
+        result = {"etherscan": None, "defillama": None, "alerts": 0, "error": None, "stats": None}
         if api_ok:
             ok = collector.safe_collect()
             if ok:
                 result["etherscan"] = "success"
+                result["stats"] = collector.last_stats
                 result["alerts"] = evaluate_all_rules()
             else:
                 result["etherscan"] = "failed"
@@ -187,7 +229,19 @@ def main():
             if last_result and last_result.get("error"):
                 st.error(f"⚠️ 采集异常: {last_result['error']}")
             elif last_result and last_result.get("etherscan") == "success":
-                st.success(f"✅ 数据采集正常 (最近更新: {elapsed:.0f}秒前)")
+                stats = last_result.get("stats") or {}
+                transfers = stats.get("new_transfers", 0)
+                blocks = stats.get("block_range", "?")
+                addrs = stats.get("addresses", 0)
+                alerts = last_result.get("alerts", 0)
+                detail_parts = [f"最近更新: {elapsed:.0f}秒前"]
+                if transfers > 0:
+                    detail_parts.append(f"新增 {transfers} 笔转账")
+                else:
+                    detail_parts.append(f"扫描 {addrs} 个地址无新转账 (区块 {blocks})")
+                if alerts > 0:
+                    detail_parts.append(f"触发 {alerts} 个警报")
+                st.success(f"✅ 数据采集正常 ({', '.join(detail_parts)})")
             elif last_result and last_result.get("etherscan") == "failed":
                 st.error(f"❌ Etherscan 连接失败，请确认 API Key 有效")
             else:

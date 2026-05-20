@@ -23,6 +23,8 @@ def _get_api_key():
 class EtherscanCollector(BaseCollector):
     def __init__(self):
         super().__init__(name="etherscan", calls_per_second=5, calls_per_day=100_000)
+        self.last_stats = {}
+        self.last_error = None
 
     def _api_params(self, extra: dict = None) -> dict:
         """Build API params with V2 chainid support."""
@@ -93,6 +95,7 @@ class EtherscanCollector(BaseCollector):
     def collect(self):
         if not _get_api_key():
             logger.warning("[etherscan] No API key configured, skipping")
+            self.last_error = "No API key configured"
             return
 
         session = get_session()
@@ -104,6 +107,7 @@ class EtherscanCollector(BaseCollector):
 
         if not addresses:
             logger.warning("[etherscan] No monitored addresses found")
+            self.last_error = "No monitored addresses in database"
             return
 
         # Get latest block
@@ -112,6 +116,7 @@ class EtherscanCollector(BaseCollector):
             logger.info(f"[etherscan] Latest block: {latest_block}")
         except Exception as e:
             logger.error(f"[etherscan] Failed to get latest block: {e}")
+            self.last_error = f"Failed to get latest block: {str(e)[:200]}"
             # Use a recent known block as fallback
             latest_block = 22000000  # ~May 2026
             logger.info(f"[etherscan] Using fallback block: {latest_block}")
@@ -122,7 +127,11 @@ class EtherscanCollector(BaseCollector):
         if from_block < latest_block - 2000:
             from_block = latest_block - 500
 
+        logger.info(f"[etherscan] Scanning blocks {from_block}-{latest_block} for {len(addresses)} addresses x {len(STABLECOIN_TOKENS)} tokens")
+
         new_transfers = 0
+        api_errors = 0
+        total_api_responses = 0
         for addr in addresses:
             for symbol, token_addr in STABLECOIN_TOKENS.items():
                 try:
@@ -132,6 +141,7 @@ class EtherscanCollector(BaseCollector):
                         from_block=from_block,
                         to_block=latest_block,
                     )
+                    total_api_responses += 1
                     for tx in transfers:
                         tx_hash = tx["hash"]
                         exists = session.query(StablecoinTransfer).filter(
@@ -163,9 +173,21 @@ class EtherscanCollector(BaseCollector):
                         session.add(transfer)
                         new_transfers += 1
                 except Exception as e:
+                    api_errors += 1
                     logger.warning(f"[etherscan] Error fetching {symbol} for {addr.label}: {e}")
                     continue
 
         session.commit()
         update_poll_state("etherscan_exchange_flows", latest_block, datetime.utcnow())
+
+        self.last_stats = {
+            "addresses": len(addresses),
+            "tokens_per_addr": len(STABLECOIN_TOKENS),
+            "block_range": f"{from_block}-{latest_block}",
+            "latest_block": latest_block,
+            "new_transfers": new_transfers,
+            "api_responses": total_api_responses,
+            "api_errors": api_errors,
+        }
+        self.last_error = None
         logger.info(f"[etherscan] Collected {new_transfers} new transfers from {len(addresses)} addresses")

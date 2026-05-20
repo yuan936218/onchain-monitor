@@ -31,12 +31,11 @@ def render_sidebar():
                 from collectors.base import make_client
                 try:
                     client = make_client(timeout=15)
-                    # Test with account/txlist — guaranteed to work with free keys
                     resp = client.get("https://api.etherscan.io/v2/api", params={
                         "chainid": "1",
                         "module": "account",
                         "action": "txlist",
-                        "address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",  # Binance wallet
+                        "address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",
                         "startblock": 0,
                         "endblock": 99999999,
                         "page": 1,
@@ -54,6 +53,47 @@ def render_sidebar():
                         st.warning(f"⚠️ 返回: {data['result'][:200]}")
                     else:
                         st.error(f"❌ API 返回: {data.get('message', str(data)[:200])}")
+                except Exception as e:
+                    st.error(f"❌ 连接失败: {str(e)[:200]}")
+            else:
+                st.warning("请先输入 API Key")
+
+        if st.button("🔬 诊断采集端点", help="测试 Tokentx 端点 (采集器实际使用的API)"):
+            if etherscan_key:
+                import httpx
+                from collectors.base import make_client
+                try:
+                    client = make_client(timeout=15)
+                    # Test tokentx on Binance wallet — the endpoint the collector uses
+                    resp = client.get("https://api.etherscan.io/v2/api", params={
+                        "chainid": "1",
+                        "module": "account",
+                        "action": "tokentx",
+                        "contractaddress": "0xdAC17F958D2ee523a2206206994597C13D831ec7",  # USDT
+                        "address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",  # Binance wallet
+                        "startblock": 0,
+                        "endblock": 99999999,
+                        "page": 1,
+                        "offset": 3,
+                        "sort": "desc",
+                        "apikey": etherscan_key,
+                    })
+                    data = resp.json()
+                    st.caption(f"请求: tokentx USDT @ Binance (最新3笔)")
+                    status = data.get("status")
+                    result = data.get("result")
+                    msg = data.get("message", "")
+                    if status == "1" and isinstance(result, list):
+                        latest_block = int(result[0]["blockNumber"]) if result else 0
+                        st.success(f"✅ Tokentx端点正常！最新 {len(result)} 笔, 区块 {latest_block:,}")
+                        for tx in result[:2]:
+                            st.caption(f"TX: {tx.get('hash','?')[:16]}... 金额: {float(tx.get('value',0))/1e6:.2f} {tx.get('tokenSymbol','?')} @ 区块 {tx.get('blockNumber','?')}")
+                    elif status == "0" and isinstance(result, list):
+                        st.warning(f"⚠️ Status=0 但返回列表: {len(result)} 条. 消息: {msg[:100]}")
+                    elif "No transactions" in msg or "No records" in msg:
+                        st.warning(f"⚠️ 该区块范围无交易. 消息: {msg[:100]}")
+                    else:
+                        st.error(f"❌ Tokentx失败: status={status}, msg={msg[:200]}, result={str(result)[:200]}")
                 except Exception as e:
                     st.error(f"❌ 连接失败: {str(e)[:200]}")
             else:

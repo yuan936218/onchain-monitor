@@ -6,6 +6,7 @@ from sqlalchemy import func, and_
 from database.models import (
     StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert,
     DailyAggregate, MonitoredAddress, PollState, ExchangeBalanceSnapshot,
+    PriceSnapshot,
 )
 from database.connection import get_session
 
@@ -307,6 +308,148 @@ def get_exchange_balance_timeseries(hours=24, chain=None, token_filter=None):
             })
 
     return result
+
+
+def get_price_history(hours: int = 24, token_id: str = "ETH"):
+    """Return price snapshots for charting.
+
+    Returns list of [{snapshot_at, price_usd}]
+    """
+    session = get_session()
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    rows = session.query(PriceSnapshot).filter(
+        PriceSnapshot.token_id == token_id,
+        PriceSnapshot.snapshot_at >= since,
+    ).order_by(PriceSnapshot.snapshot_at.asc()).all()
+
+    return [{"snapshot_at": r.snapshot_at, "price_usd": r.price_usd} for r in rows]
+
+
+def get_market_intel_data(hours: int = 6, chain=None):
+    """Aggregate recent data for the market intelligence brief.
+
+    Returns a dict with summary metrics for natural language generation.
+    """
+    session = get_session()
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    # Exchange addresses
+    addr_q = session.query(MonitoredAddress.address, MonitoredAddress.label).filter(
+        MonitoredAddress.category == "exchange",
+        MonitoredAddress.is_active == True,
+    )
+    if chain:
+        addr_q = addr_q.filter(MonitoredAddress.chain == chain)
+    exchange_addrs = addr_q.all()
+    exchange_set = {a[0] for a in exchange_addrs}
+
+    # Transfers in window
+    tx_q = session.query(StablecoinTransfer).filter(
+        StablecoinTransfer.detected_at >= since,
+    )
+    if chain:
+        tx_q = tx_q.filter(StablecoinTransfer.chain == chain)
+
+    transfers = tx_q.all()
+
+    total_inflow = sum(t.value_usd or 0 for t in transfers if t.to_address in exchange_set)
+    total_outflow = sum(t.value_usd or 0 for t in transfers if t.from_address in exchange_set)
+    large_count = sum(1 for t in transfers if (t.value_usd or 0) >= 10_000_000)
+
+    # Per-exchange flow
+    exchange_flows = {}
+    for t in transfers:
+        if t.to_address in exchange_set:
+            name = next((lbl for addr, lbl in exchange_addrs if addr == t.to_address), None)
+            if name:
+                name = name.rstrip(" 0123456789").strip()
+                d = exchange_flows.setdefault(name, {"inflow": 0, "outflow": 0})
+                d["inflow"] += t.value_usd or 0
+        if t.from_address in exchange_set:
+            name = next((lbl for addr, lbl in exchange_addrs if addr == t.from_address), None)
+            if name:
+                name = name.rstrip(" 0123456789").strip()
+                d = exchange_flows.setdefault(name, {"inflow": 0, "outflow": 0})
+                d["outflow"] += t.value_usd or 0
+
+    # Whale movements
+    whale_q = session.query(WhaleMovement).filter(
+        WhaleMovement.detected_at >= since,
+    )
+    if chain:
+        whale_q = whale_q.filter(WhaleMovement.chain == chain)
+    whale_moves = whale_q.order_by(WhaleMovement.value_usd.desc()).limit(5).all()
+
+    # Mint/burn
+    mint_q = session.query(MintBurnEvent).filter(
+        MintBurnEvent.detected_at >= since,
+    )
+    if chain:
+        mint_q = mint_q.filter(MintBurnEvent.chain == chain)
+    mint_events = mint_q.all()
+    total_mint = sum(e.value_usd or 0 for e in mint_events if e.event_type == "mint")
+    total_burn = sum(e.value_usd or 0 for e in mint_events if e.event_type == "burn")
+
+    # Latest balance totals
+    from sqlalchemy import and_
+    balance_q = session.query(ExchangeBalanceSnapshot).filter(
+        ExchangeBalanceSnapshot.snapshot_at >= since,
+    )
+    if chain:
+        balance_q = balance_q.filter(ExchangeBalanceSnapshot.chain == chain)
+    balances = balance_q.all()
+
+    exchange_balance_latest = {}
+    for b in balances:
+        name = b.exchange_name.rstrip(" 0123456789").strip()
+        key = (name, b.chain)
+        if key not in exchange_balance_latest or b.snapshot_at > exchange_balance_latest[key]["snapshot_at"]:
+            exchange_balance_latest[key] = {"balance_usd": b.balance_usd or 0, "snapshot_at": b.snapshot_at}
+
+    # Net balance change signals
+    balance_signals = []
+    for (name, chain_name), info in exchange_balance_latest.items():
+        # Find earliest balance in window to compute change
+        earliest = min(
+            (b for b in balances if b.exchange_name.rstrip(" 0123456789").strip() == name and b.chain == chain_name),
+            key=lambda x: x.snapshot_at,
+            default=None,
+        )
+        if earliest and info["balance_usd"] > 0:
+            change = info["balance_usd"] - (earliest.balance_usd or 0)
+            if abs(change) > 100_000:  # Only report >$100k changes
+                balance_signals.append({
+                    "exchange": f"{name} ({chain_name})",
+                    "change": change,
+                    "current": info["balance_usd"],
+                })
+
+    balance_signals.sort(key=lambda x: abs(x["change"]), reverse=True)
+
+    return {
+        "hours": hours,
+        "total_transfers": len(transfers),
+        "total_inflow": total_inflow,
+        "total_outflow": total_outflow,
+        "net_flow": total_outflow - total_inflow,
+        "large_count": large_count,
+        "exchange_flows": exchange_flows,
+        "whale_moves": [
+            {
+                "asset": w.asset,
+                "value_usd": w.value_usd,
+                "from_label": w.from_label,
+                "to_label": w.to_label,
+                "chain": w.chain,
+            }
+            for w in whale_moves
+        ],
+        "total_mint": total_mint,
+        "total_burn": total_burn,
+        "net_mint": total_mint - total_burn,
+        "balance_signals": balance_signals[:5],
+    }
 
 
 def update_poll_state(source, last_block, last_timestamp):

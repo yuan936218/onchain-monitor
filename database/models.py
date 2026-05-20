@@ -108,6 +108,19 @@ class ExchangeBalanceSnapshot(Base):
     detected_at = Column(DateTime, default=datetime.utcnow)
 
 
+class PriceSnapshot(Base):
+    __tablename__ = "price_snapshots"
+    __table_args__ = (
+        Index("idx_ps_token_time", "token_id", "snapshot_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    token_id = Column(String(30), nullable=False)
+    price_usd = Column(Float, nullable=False)
+    snapshot_at = Column(DateTime, nullable=False)
+    detected_at = Column(DateTime, default=datetime.utcnow)
+
+
 class DailyAggregate(Base):
     __tablename__ = "daily_aggregates"
     __table_args__ = (UniqueConstraint("date", "chain", "metric_name"),)

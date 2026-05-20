@@ -34,6 +34,8 @@ from dashboard.mint_burn_timeline import render_mint_burn_timeline
 from dashboard.whale_movements import render_whale_movements
 from dashboard.hourly_heatmap import render_hourly_heatmap
 from dashboard.exchange_balance_chart import render_exchange_balance_chart
+from dashboard.price_flow_chart import render_price_flow_chart
+from dashboard.market_intel import render_market_intel
 
 logging.basicConfig(level=logging.INFO)
 
@@ -157,11 +159,11 @@ def setup_scheduler(run_sync_first=True):
 
     def daily_cleanup():
         from database.connection import get_session, engine
-        from database.models import StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert, ExchangeBalanceSnapshot
+        from database.models import StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert, ExchangeBalanceSnapshot, PriceSnapshot
         retention = st.session_state.get("retention_days", 90)
         cutoff = datetime.utcnow() - timedelta(days=retention)
         session = get_session()
-        for model in [StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert, ExchangeBalanceSnapshot]:
+        for model in [StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert, ExchangeBalanceSnapshot, PriceSnapshot]:
             deleted = session.query(model).filter(model.detected_at < cutoff).delete()
             if deleted:
                 logging.info(f"[cleanup] Deleted {deleted} old {model.__tablename__} records")
@@ -258,6 +260,11 @@ def main():
     st.divider()
 
     # Main dashboard layout
+    # Row 0: Market Intelligence Brief
+    render_market_intel()
+
+    st.divider()
+
     # Row 1: Alerts
     render_alerts()
 
@@ -270,6 +277,11 @@ def main():
 
     # Row 3: Time pattern analysis
     render_hourly_heatmap()
+
+    st.divider()
+
+    # Row 3.5: Price-Flow correlation
+    render_price_flow_chart()
 
     st.divider()
 

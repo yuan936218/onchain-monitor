@@ -2,6 +2,7 @@
 
 import logging
 from alerts.rules import rule_large_exchange_inflow, rule_large_transfer, rule_exchange_flow_surge
+from alerts.anomaly import detect_flow_anomaly
 from utils.feishu import send_alert
 
 logger = logging.getLogger(__name__)
@@ -10,6 +11,7 @@ ALL_RULES = [
     ("large_exchange_inflow", rule_large_exchange_inflow),
     ("large_transfer", rule_large_transfer),
     ("exchange_flow_surge", rule_exchange_flow_surge),
+    ("flow_anomaly", detect_flow_anomaly),
 ]
 
 

@@ -35,26 +35,34 @@ def get_24h_aggregates():
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=24)
 
-    inflow = session.query(func.sum(StablecoinTransfer.value_usd)).filter(
-        and_(
-            StablecoinTransfer.block_timestamp >= since,
-            StablecoinTransfer.to_label.isnot(None),
-        )
-    ).scalar() or 0
+    # Get exchange addresses for matching (more reliable than label checks)
+    exchange_addrs = [a[0] for a in session.query(MonitoredAddress.address).filter(
+        MonitoredAddress.category == "exchange",
+        MonitoredAddress.is_active == True,
+    ).all()]
 
-    outflow = session.query(func.sum(StablecoinTransfer.value_usd)).filter(
-        and_(
-            StablecoinTransfer.block_timestamp >= since,
-            StablecoinTransfer.from_label.isnot(None),
-        )
-    ).scalar() or 0
+    inflow = 0
+    outflow = 0
+    large_tx_count = 0
+    mint_count = 0
 
-    large_tx_count = session.query(StablecoinTransfer).filter(
-        and_(
+    if exchange_addrs:
+        inflow = session.query(func.sum(StablecoinTransfer.value_usd)).filter(
             StablecoinTransfer.block_timestamp >= since,
-            StablecoinTransfer.value_usd >= 1_000_000,
-        )
-    ).count()
+            StablecoinTransfer.to_address.in_(exchange_addrs),
+        ).scalar() or 0
+
+        outflow = session.query(func.sum(StablecoinTransfer.value_usd)).filter(
+            StablecoinTransfer.block_timestamp >= since,
+            StablecoinTransfer.from_address.in_(exchange_addrs),
+        ).scalar() or 0
+
+        large_tx_count = session.query(StablecoinTransfer).filter(
+            and_(
+                StablecoinTransfer.block_timestamp >= since,
+                StablecoinTransfer.value_usd >= 1_000_000,
+            )
+        ).count()
 
     mint_count = session.query(MintBurnEvent).filter(
         and_(
@@ -64,9 +72,9 @@ def get_24h_aggregates():
     ).count()
 
     return {
-        "inflow": inflow,
-        "outflow": outflow,
-        "net_flow": outflow - inflow,  # positive = outflow (accumulation), negative = inflow (sell pressure)
+        "inflow": float(inflow),
+        "outflow": float(outflow),
+        "net_flow": float(outflow) - float(inflow),
         "large_tx_count": large_tx_count,
         "mint_count": mint_count,
     }
@@ -94,19 +102,29 @@ def get_exchange_flow_timeseries(hours=24):
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=hours)
 
+    # Get exchange addresses
+    exchange_addrs = [a[0] for a in session.query(MonitoredAddress.address).filter(
+        MonitoredAddress.category == "exchange",
+        MonitoredAddress.is_active == True,
+    ).all()]
+
+    if not exchange_addrs:
+        return []
+
     transfers = session.query(StablecoinTransfer).filter(
         StablecoinTransfer.block_timestamp >= since
     ).all()
 
-    # Group by hour
+    # Group by hour, matching against exchange address list directly
     hourly = {}
+    exchange_set = set(exchange_addrs)
     for t in transfers:
         hour_key = t.block_timestamp.replace(minute=0, second=0, microsecond=0)
         if hour_key not in hourly:
             hourly[hour_key] = {"inflow": 0, "outflow": 0}
-        if t.to_label:  # money going INTO an exchange wallet
+        if t.to_address in exchange_set:
             hourly[hour_key]["inflow"] += t.value_usd or 0
-        if t.from_label:  # money going OUT of an exchange wallet
+        if t.from_address in exchange_set:
             hourly[hour_key]["outflow"] += t.value_usd or 0
 
     return sorted(

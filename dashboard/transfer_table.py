@@ -20,8 +20,8 @@ def render_transfer_table():
         token_filter = st.selectbox("币种", options=["ALL", "USDT", "USDC"], format_func=lambda x: "全部" if x == "ALL" else x)
     with col3:
         min_val = st.number_input(
-            "最低金额 (USD)", min_value=100_000, max_value=100_000_000,
-            value=500_000, step=100_000, format="%d",
+            "最低金额 (USD)", min_value=10_000, max_value=100_000_000,
+            value=100_000, step=10_000, format="%d",
         )
 
     transfers = get_large_transfers(hours=hours, min_value_usd=min_val, token_filter=token_filter)

@@ -11,7 +11,7 @@ def render_mint_burn_timeline():
     events = get_recent_mint_burns(hours=48)
 
     if not events:
-        st.info("暂无铸造/销毁事件。")
+        st.info("暂无铸造/销毁事件。采集器每轮检测 >$1M 的供应量变化，通常需要较长时间积累。")
         return
 
     for event in events[:20]:

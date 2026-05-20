@@ -11,7 +11,7 @@ def render_whale_movements():
     movements = get_whale_movements(hours=24)
 
     if not movements:
-        st.info("暂无巨鲸动向数据。")
+        st.info("暂无巨鲸动向数据。需要配置 Whale Alert API Key 或等待巨鲸交易触发。")
         return
 
     for m in movements[:20]:

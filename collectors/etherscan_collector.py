@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from collectors.base import BaseCollector
 from database.connection import get_session
-from database.models import StablecoinTransfer, MonitoredAddress
+from database.models import StablecoinTransfer, MonitoredAddress, WhaleMovement
 from database.queries import get_poll_state, update_poll_state
 from config.settings import ETHERSCAN_API_KEY, ETHERSCAN_BASE_URL, STABLECOIN_TOKENS
 from utils.address_labeler import resolve_label
@@ -105,6 +105,13 @@ class EtherscanCollector(BaseCollector):
             MonitoredAddress.category == "exchange",
         ).all()
 
+        # Also load whale addresses for whale movement detection
+        whale_addresses = session.query(MonitoredAddress).filter(
+            MonitoredAddress.is_active == True,
+            MonitoredAddress.category == "whale",
+        ).all()
+        whale_addr_set = {w.address.lower() for w in whale_addresses} if whale_addresses else set()
+
         if not addresses:
             logger.warning("[etherscan] No monitored addresses found")
             self.last_error = "No monitored addresses in database"
@@ -135,6 +142,7 @@ class EtherscanCollector(BaseCollector):
         logger.info(f"[etherscan] Scanning blocks {from_block}-{latest_block} for {len(addresses)} addresses x {len(STABLECOIN_TOKENS)} tokens")
 
         new_transfers = 0
+        new_whale_moves = 0
         api_errors = 0
         total_api_responses = 0
         for addr in addresses:
@@ -177,6 +185,28 @@ class EtherscanCollector(BaseCollector):
                         )
                         session.add(transfer)
                         new_transfers += 1
+
+                        # Check if this transfer involves a whale address → record as whale movement
+                        if whale_addr_set and (from_addr in whale_addr_set or to_addr in whale_addr_set):
+                            whale_exists = session.query(WhaleMovement).filter(
+                                WhaleMovement.tx_hash == tx_hash
+                            ).first()
+                            if not whale_exists:
+                                whale = WhaleMovement(
+                                    tx_hash=tx_hash,
+                                    chain="ethereum",
+                                    from_address=from_addr,
+                                    to_address=to_addr,
+                                    from_label=resolve_label(from_addr),
+                                    to_label=resolve_label(to_addr),
+                                    asset=symbol,
+                                    value=value,
+                                    value_usd=value,
+                                    block_number=int(tx["blockNumber"]),
+                                    block_timestamp=datetime.utcfromtimestamp(int(tx["timeStamp"])),
+                                )
+                                session.add(whale)
+                                new_whale_moves += 1
                 except Exception as e:
                     api_errors += 1
                     logger.warning(f"[etherscan] Error fetching {symbol} for {addr.label}: {e}")
@@ -187,12 +217,14 @@ class EtherscanCollector(BaseCollector):
 
         self.last_stats = {
             "addresses": len(addresses),
+            "whale_addresses": len(whale_addr_set),
             "tokens_per_addr": len(STABLECOIN_TOKENS),
             "block_range": f"{from_block}-{latest_block}",
             "latest_block": latest_block,
             "new_transfers": new_transfers,
+            "new_whale_moves": new_whale_moves,
             "api_responses": total_api_responses,
             "api_errors": api_errors,
         }
         self.last_error = None
-        logger.info(f"[etherscan] Collected {new_transfers} new transfers from {len(addresses)} addresses")
+        logger.info(f"[etherscan] Collected {new_transfers} transfers + {new_whale_moves} whale moves from {len(addresses)} addresses")

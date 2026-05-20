@@ -1,4 +1,4 @@
-"""Exchange flow bar chart component."""
+"""Exchange flow bar chart component — Chinese UI."""
 
 import streamlit as st
 import plotly.graph_objects as go
@@ -7,12 +7,12 @@ from database.queries import get_exchange_flow_timeseries
 
 
 def render_exchange_flow_chart():
-    st.subheader("📈 Exchange Flow (Hourly)")
+    st.subheader("📈 交易所资金流向 (按小时)")
 
     data = get_exchange_flow_timeseries(hours=24)
 
     if not data:
-        st.caption("No exchange flow data collected yet. Start the collector to see data.")
+        st.caption("暂无交易所流量数据，请先启动采集器。")
         return
 
     df = pd.DataFrame(data)
@@ -21,16 +21,16 @@ def render_exchange_flow_chart():
     fig.add_trace(go.Bar(
         x=df["hour"],
         y=df["inflow"],
-        name="Inflow (to exchanges)",
-        marker_color="#ef4444",  # red for inflow (sell pressure)
-        hovertemplate="%{y:$,.0f}<extra>Inflow</extra>",
+        name="流入交易所",
+        marker_color="#ef4444",
+        hovertemplate="%{y:$,.0f}<extra>流入</extra>",
     ))
     fig.add_trace(go.Bar(
         x=df["hour"],
         y=df["outflow"],
-        name="Outflow (from exchanges)",
-        marker_color="#22c55e",  # green for outflow (accumulation)
-        hovertemplate="%{y:$,.0f}<extra>Outflow</extra>",
+        name="流出交易所",
+        marker_color="#22c55e",
+        hovertemplate="%{y:$,.0f}<extra>流出</extra>",
     ))
 
     fig.update_layout(
@@ -39,7 +39,7 @@ def render_exchange_flow_chart():
         height=300,
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         xaxis_title=None,
-        yaxis_title="USD Value",
+        yaxis_title="美元价值",
         hovermode="x unified",
     )
 

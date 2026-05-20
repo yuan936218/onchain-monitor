@@ -15,7 +15,7 @@ import pandas as pd
 
 # Page config must be the first Streamlit call
 st.set_page_config(
-    page_title="On-Chain Monitor",
+    page_title="链上数据监控",
     page_icon="🔍",
     layout="wide",
 )
@@ -128,8 +128,8 @@ def setup_scheduler():
 
 
 def main():
-    st.title("🔍 On-Chain Data Monitor")
-    st.caption("Track stablecoin flows, whale movements, and market-moving events")
+    st.title("🔍 链上数据监控面板")
+    st.caption("追踪稳定币流向、巨鲸动向和市场异动事件")
 
     # Sidebar
     render_sidebar()
@@ -145,26 +145,26 @@ def main():
         if st.session_state["scheduler"] is None:
             scheduler, collector = setup_scheduler()
             st.session_state["scheduler"] = scheduler
-            st.toast("✅ Data collector started!")
+            st.toast("✅ 数据采集已启动!")
     else:
         if st.session_state["scheduler"] is not None:
             st.session_state["scheduler"].shutdown(wait=False)
             st.session_state["scheduler"] = None
-            st.toast("⏸️ Data collector stopped")
+            st.toast("⏸️ 数据采集已停止")
 
     # Status bar
     api_ok = bool(ETHERSCAN_API_KEY or os.getenv("ETHERSCAN_API_KEY"))
     running = st.session_state.get("collector_running", False)
     status_color = "🟢" if (api_ok and running) else "🟡" if api_ok else "🔴"
-    status_text = "Collecting" if (api_ok and running) else "Ready (API OK)" if api_ok else "API Key Needed"
+    status_text = "采集中" if (api_ok and running) else "就绪 (API已配置)" if api_ok else "需要API Key"
 
     alert_count = get_unacknowledged_alert_count()
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Status", f"{status_color} {status_text}")
-    col2.metric("Unacknowledged Alerts", alert_count)
-    col3.metric("Monitored Addresses", get_session().query(MonitoredAddress).filter(MonitoredAddress.is_active == True).count())
-    col4.metric("API Keys", f"Etherscan: {'✓' if api_ok else '✗'}")
+    col1.metric("运行状态", f"{status_color} {status_text}")
+    col2.metric("未读警报", alert_count)
+    col3.metric("监控地址数", get_session().query(MonitoredAddress).filter(MonitoredAddress.is_active == True).count())
+    col4.metric("API配置", f"Etherscan: {'✓ 已配置' if api_ok else '✗ 未配置'}")
 
     st.divider()
 
@@ -202,8 +202,8 @@ def main():
 
     with st.sidebar:
         st.divider()
-        st.caption(f"Next auto-refresh in: {next_refresh:.0f}s")
-        if st.button("🔄 Refresh Dashboard"):
+        st.caption(f"下次自动刷新: {next_refresh:.0f}秒")
+        if st.button("🔄 刷新面板"):
             st.session_state["last_refresh"] = time.time()
             st.rerun()
 

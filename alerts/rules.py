@@ -1,4 +1,4 @@
-"""Alert rule definitions."""
+"""Alert rule definitions — Chinese alert messages."""
 
 from datetime import datetime, timedelta
 from database.connection import get_session
@@ -13,9 +13,8 @@ from sqlalchemy import func, and_
 
 
 def rule_large_exchange_inflow():
-    """Alert when a single stablecoin transfer into an exchange exceeds threshold."""
+    """警报：单笔超大额稳定币流入交易所。"""
     session = get_session()
-    # Find recent large inflows that haven't been alerted yet
     recent = session.query(StablecoinTransfer).filter(
         and_(
             StablecoinTransfer.value_usd >= THRESHOLD_EXCHANGE_INFLOW,
@@ -26,7 +25,6 @@ def rule_large_exchange_inflow():
 
     alerts_created = 0
     for tx in recent:
-        # Deduplicate: check if alert exists for this tx
         existing = session.query(Alert).filter(
             Alert.related_tx_hash == tx.tx_hash
         ).first()
@@ -36,10 +34,10 @@ def rule_large_exchange_inflow():
         alert = Alert(
             alert_type="large_exchange_inflow",
             severity="critical",
-            title=f"Large inflow to {tx.to_label}",
+            title=f"大额资金流入 {tx.to_label}",
             description=(
-                f"{tx.value:,.2f} {tx.token_symbol} flowed INTO {tx.to_label} "
-                f"(≈${tx.value_usd:,.0f} USD). Potential sell pressure incoming."
+                f"{tx.value:,.2f} {tx.token_symbol} 流入 {tx.to_label} "
+                f"(约 ${tx.value_usd:,.0f} USD)。可能预示抛售压力，注意风险。"
             ),
             related_tx_hash=tx.tx_hash,
             value_usd=tx.value_usd,
@@ -52,7 +50,7 @@ def rule_large_exchange_inflow():
 
 
 def rule_large_transfer():
-    """Alert on any stablecoin transfer above the large transfer threshold."""
+    """警报：任意大额转账。"""
     session = get_session()
     recent = session.query(StablecoinTransfer).filter(
         and_(
@@ -71,15 +69,15 @@ def rule_large_transfer():
 
         from_info = tx.from_label or tx.from_address[:10]
         to_info = tx.to_label or tx.to_address[:10]
-        direction = "to exchange" if tx.to_label else ("from exchange" if tx.from_label else "between addresses")
+        direction = "转入交易所" if tx.to_label else ("转出交易所" if tx.from_label else "链上转账")
 
         alert = Alert(
             alert_type="large_transfer",
             severity="warning",
-            title=f"Large transfer: {tx.value:,.2f} {tx.token_symbol}",
+            title=f"大额转账: {tx.value:,.2f} {tx.token_symbol}",
             description=(
-                f"{tx.value:,.2f} {tx.token_symbol} (≈${tx.value_usd:,.0f} USD) "
-                f"transferred from {from_info} to {to_info} ({direction})."
+                f"{tx.value:,.2f} {tx.token_symbol} (约 ${tx.value_usd:,.0f} USD) "
+                f"从 {from_info} 至 {to_info} ({direction})。"
             ),
             related_tx_hash=tx.tx_hash,
             value_usd=tx.value_usd,
@@ -92,7 +90,7 @@ def rule_large_transfer():
 
 
 def rule_exchange_flow_surge():
-    """Alert when total exchange inflow in last 10 minutes exceeds threshold."""
+    """警报：10分钟内交易所流入总额超阈值。"""
     session = get_session()
     since = datetime.utcnow() - timedelta(minutes=10)
 
@@ -104,7 +102,6 @@ def rule_exchange_flow_surge():
     ).scalar() or 0
 
     if total_inflow >= THRESHOLD_EXCHANGE_FLOW_SURGE:
-        # Deduplicate: check if similar alert was created recently
         existing = session.query(Alert).filter(
             and_(
                 Alert.alert_type == "exchange_flow_surge",
@@ -117,10 +114,10 @@ def rule_exchange_flow_surge():
         alert = Alert(
             alert_type="exchange_flow_surge",
             severity="critical",
-            title=f"Exchange inflow surge: ${total_inflow:,.0f} in 10 minutes",
+            title=f"交易所资金涌入: 10分钟内流入 ${total_inflow:,.0f}",
             description=(
-                f"Massive stablecoin inflow to exchanges detected in the last 10 minutes "
-                f"(total ≈${total_inflow:,.0f} USD). This often precedes sell pressure."
+                f"最近10分钟检测到异常大量稳定币流入交易所 "
+                f"(总计约 ${total_inflow:,.0f} USD)。这通常预示即将出现抛售压力。"
             ),
             value_usd=total_inflow,
         )

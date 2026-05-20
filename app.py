@@ -33,6 +33,7 @@ from dashboard.transfer_table import render_transfer_table
 from dashboard.mint_burn_timeline import render_mint_burn_timeline
 from dashboard.whale_movements import render_whale_movements
 from dashboard.hourly_heatmap import render_hourly_heatmap
+from dashboard.exchange_balance_chart import render_exchange_balance_chart
 
 logging.basicConfig(level=logging.INFO)
 
@@ -156,11 +157,11 @@ def setup_scheduler(run_sync_first=True):
 
     def daily_cleanup():
         from database.connection import get_session, engine
-        from database.models import StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert
+        from database.models import StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert, ExchangeBalanceSnapshot
         retention = st.session_state.get("retention_days", 90)
         cutoff = datetime.utcnow() - timedelta(days=retention)
         session = get_session()
-        for model in [StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert]:
+        for model in [StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert, ExchangeBalanceSnapshot]:
             deleted = session.query(model).filter(model.detected_at < cutoff).delete()
             if deleted:
                 logging.info(f"[cleanup] Deleted {deleted} old {model.__tablename__} records")
@@ -272,7 +273,12 @@ def main():
 
     st.divider()
 
-    # Row 4: Exchange flow chart + Transfer table
+    # Row 4: Exchange balance chart
+    render_exchange_balance_chart()
+
+    st.divider()
+
+    # Row 5: Exchange flow chart + Transfer table
     col_chart, col_table = st.columns([6, 5])
     with col_chart:
         render_exchange_flow_chart()
@@ -281,7 +287,7 @@ def main():
 
     st.divider()
 
-    # Row 4: Mint/burn + Whale movements
+    # Row 6: Mint/burn + Whale movements
     col_mint, col_whale = st.columns(2)
     with col_mint:
         render_mint_burn_timeline()

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, and_
 from database.models import (
     StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert,
-    DailyAggregate, MonitoredAddress, PollState,
+    DailyAggregate, MonitoredAddress, PollState, ExchangeBalanceSnapshot,
 )
 from database.connection import get_session
 
@@ -267,6 +267,46 @@ def get_active_monitored_addresses(category=None, chain=None):
 def get_poll_state(source):
     session = get_session()
     return session.query(PollState).filter(PollState.source == source).first()
+
+
+def get_exchange_balance_timeseries(hours=24, chain=None, token_filter=None):
+    """Return exchange balance snapshots for charting.
+
+    Returns dict: exchange_name -> list[{snapshot_at, token_symbol, balance_usd}]
+    """
+    session = get_session()
+    since = datetime.utcnow() - timedelta(hours=hours)
+
+    q = session.query(ExchangeBalanceSnapshot).filter(
+        ExchangeBalanceSnapshot.snapshot_at >= since,
+    )
+    if chain:
+        q = q.filter(ExchangeBalanceSnapshot.chain == chain)
+    if token_filter and token_filter != "ALL":
+        q = q.filter(ExchangeBalanceSnapshot.token_symbol == token_filter)
+
+    snapshots = q.order_by(
+        ExchangeBalanceSnapshot.exchange_name,
+        ExchangeBalanceSnapshot.snapshot_at.asc(),
+    ).all()
+
+    # Group by exchange, aggregate all tokens per snapshot time
+    result = {}
+    for s in snapshots:
+        name = s.exchange_name
+        if name not in result:
+            result[name] = []
+        # Merge same-timestamp entries by adding balance_usd
+        existing = [r for r in result[name] if r["snapshot_at"] == s.snapshot_at]
+        if existing:
+            existing[0]["balance_usd"] = (existing[0]["balance_usd"] or 0) + (s.balance_usd or 0)
+        else:
+            result[name].append({
+                "snapshot_at": s.snapshot_at,
+                "balance_usd": s.balance_usd or 0,
+            })
+
+    return result
 
 
 def update_poll_state(source, last_block, last_timestamp):

@@ -89,6 +89,25 @@ class MintBurnEvent(Base):
     detected_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ExchangeBalanceSnapshot(Base):
+    __tablename__ = "exchange_balance_snapshots"
+    __table_args__ = (
+        Index("idx_ebs_snapshot_at", "snapshot_at"),
+        Index("idx_ebs_exchange", "exchange_name"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    chain = Column(String(20), nullable=False, default="ethereum")
+    exchange_name = Column(String(100), nullable=False)
+    exchange_address = Column(String(42), nullable=False)
+    token_symbol = Column(String(10), nullable=False)
+    token_address = Column(String(42), nullable=False)
+    balance_raw = Column(Float, nullable=False)
+    balance_usd = Column(Float)
+    snapshot_at = Column(DateTime, nullable=False)
+    detected_at = Column(DateTime, default=datetime.utcnow)
+
+
 class DailyAggregate(Base):
     __tablename__ = "daily_aggregates"
     __table_args__ = (UniqueConstraint("date", "chain", "metric_name"),)

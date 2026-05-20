@@ -2,10 +2,10 @@
 
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from collectors.base import BaseCollector
 from database.connection import get_session
-from database.models import StablecoinTransfer, MonitoredAddress, WhaleMovement, MintBurnEvent
+from database.models import StablecoinTransfer, MonitoredAddress, WhaleMovement, MintBurnEvent, ExchangeBalanceSnapshot
 from database.queries import get_poll_state, update_poll_state
 from config.settings import ETHERSCAN_API_KEY, ETHERSCAN_BASE_URL, CHAIN_CONFIG, MONITORED_TOKENS
 from utils.address_labeler import resolve_label
@@ -293,6 +293,9 @@ class EtherscanCollector(BaseCollector):
                     logger.warning(f"[etherscan] Error fetching {symbol} for {addr.label} on {chain}: {e}")
                     continue
 
+        # Snapshot exchange balances (time-gated every 15 min)
+        self._snapshot_balances(chain, session)
+
         update_poll_state(f"etherscan_{chain}", latest_block, datetime.utcnow())
 
         return {
@@ -306,6 +309,97 @@ class EtherscanCollector(BaseCollector):
             "api_responses": api_responses,
             "api_errors": api_errors,
         }
+
+    # Time gate: snapshot balances at most every 15 minutes per chain
+    _last_balance_snapshot = {}
+
+    def _snapshot_balances(self, chain: str, session):
+        """Snapshot exchange wallet balances for a single chain."""
+        now = datetime.utcnow()
+        last = self._last_balance_snapshot.get(chain)
+        if last and (now - last).total_seconds() < 900:
+            return
+
+        chain_id = CHAIN_CONFIG[chain]["chain_id"]
+        tokens = MONITORED_TOKENS.get(chain, {})
+        if not tokens:
+            return
+
+        addresses = session.query(MonitoredAddress).filter(
+            MonitoredAddress.is_active == True,
+            MonitoredAddress.category == "exchange",
+            MonitoredAddress.chain == chain,
+        ).all()
+
+        if not addresses:
+            return
+
+        eth_price = get_eth_price()
+        wbtc_price = get_wbtc_price()
+
+        snapshots_saved = 0
+        for addr in addresses:
+            label = addr.label or addr.address[:10]
+            for symbol, token_info in tokens.items():
+                try:
+                    token_type = token_info.get("type", "erc20")
+                    decimals = int(token_info.get("decimals", 18))
+
+                    if token_type == "native":
+                        data = self._api_call(self._api_params(chain_id, {
+                            "module": "account",
+                            "action": "balance",
+                            "address": addr.address,
+                            "tag": "latest",
+                        }))
+                        if data.get("status") != "1" or not isinstance(data.get("result"), str):
+                            continue
+                        balance_raw = float(data["result"]) / (10 ** decimals)
+                        if symbol == "ETH":
+                            balance_usd = balance_raw * (eth_price or 0)
+                        else:
+                            balance_usd = balance_raw  # native token priced as $1 (unlikely path)
+                    else:
+                        data = self._api_call(self._api_params(chain_id, {
+                            "module": "account",
+                            "action": "tokenbalance",
+                            "contractaddress": token_info["address"],
+                            "address": addr.address,
+                            "tag": "latest",
+                        }))
+                        if data.get("status") != "1" or not isinstance(data.get("result"), str):
+                            continue
+                        balance_raw = float(data["result"]) / (10 ** decimals)
+                        if symbol == "ETH":
+                            balance_usd = balance_raw * (eth_price or 0)
+                        elif symbol == "WBTC":
+                            balance_usd = balance_raw * (wbtc_price or 0)
+                        else:
+                            balance_usd = balance_raw  # stablecoin ≈ $1
+
+                    if balance_raw <= 0:
+                        continue
+
+                    snapshot = ExchangeBalanceSnapshot(
+                        chain=chain,
+                        exchange_name=label,
+                        exchange_address=addr.address,
+                        token_symbol=symbol,
+                        token_address=token_info.get("address", "0x0000000000000000000000000000000000000000").lower(),
+                        balance_raw=balance_raw,
+                        balance_usd=balance_usd,
+                        snapshot_at=now,
+                    )
+                    session.add(snapshot)
+                    snapshots_saved += 1
+                except Exception as e:
+                    logger.debug(f"[etherscan] Balance snapshot error {symbol} {addr.label} {chain}: {e}")
+                    continue
+
+        if snapshots_saved:
+            session.commit()
+            self._last_balance_snapshot[chain] = now
+            logger.info(f"[etherscan] {chain} balance snapshot: {snapshots_saved} records")
 
     def collect(self, chains=None):
         if not _get_api_key():

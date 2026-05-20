@@ -25,6 +25,17 @@ def render_sidebar():
             import os
             os.environ["ETHERSCAN_API_KEY"] = etherscan_key
 
+        feishu_url = st.text_input(
+            "飞书 Webhook URL",
+            type="password",
+            value=st.session_state.get("feishu_webhook", ""),
+            help="在飞书群 → 设置 → 群机器人 → 添加机器人 → 复制 Webhook 地址",
+        )
+        if feishu_url != st.session_state.get("feishu_webhook", ""):
+            st.session_state["feishu_webhook"] = feishu_url
+            import os
+            os.environ["FEISHU_WEBHOOK_URL"] = feishu_url
+
         # Thresholds
         st.subheader("⚡ 警报阈值")
         threshold_large = st.number_input(

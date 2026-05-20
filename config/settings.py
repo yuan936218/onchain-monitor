@@ -13,6 +13,9 @@ HTTPS_PROXY = os.getenv("HTTPS_PROXY", os.getenv("https_proxy", ""))
 # Leave empty to use official api.etherscan.io
 ETHERSCAN_BASE_URL = os.getenv("ETHERSCAN_BASE_URL", "https://api.etherscan.io")
 
+# Feishu bot webhook URL
+FEISHU_WEBHOOK_URL = os.getenv("FEISHU_WEBHOOK_URL", "")
+
 # API Keys
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
 WHALE_ALERT_API_KEY = os.getenv("WHALE_ALERT_API_KEY", "")

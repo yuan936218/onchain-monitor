@@ -92,7 +92,7 @@ def setup_scheduler():
     coingecko_collector = CoinGeckoCollector()
 
     def collect_all():
-        api_ok = bool(ETHERSCAN_API_KEY or os.getenv("ETHERSCAN_API_KEY"))
+        api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
         if api_ok:
             collector.safe_collect()
             evaluate_all_rules()
@@ -153,7 +153,7 @@ def main():
             st.toast("⏸️ 数据采集已停止")
 
     # Status bar
-    api_ok = bool(ETHERSCAN_API_KEY or os.getenv("ETHERSCAN_API_KEY"))
+    api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
     running = st.session_state.get("collector_running", False)
     status_color = "🟢" if (api_ok and running) else "🟡" if api_ok else "🔴"
     status_text = "采集中" if (api_ok and running) else "就绪 (API已配置)" if api_ok else "需要API Key"

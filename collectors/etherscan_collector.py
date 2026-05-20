@@ -1,5 +1,6 @@
 """Etherscan API collector for stablecoin transfers."""
 
+import os
 import logging
 from datetime import datetime
 from collectors.base import BaseCollector
@@ -12,17 +13,26 @@ from utils.address_labeler import resolve_label
 logger = logging.getLogger(__name__)
 
 
+def _get_api_key():
+    """Read API key at runtime — supports Streamlit Cloud secrets and sidebar input."""
+    # Check os.environ first (set by sidebar or Streamlit Cloud)
+    key = os.getenv("ETHERSCAN_API_KEY", "")
+    if key:
+        return key
+    # Check the module-level constant (set at import from st.secrets or env)
+    return ETHERSCAN_API_KEY
+
+
 class EtherscanCollector(BaseCollector):
     def __init__(self):
         super().__init__(name="etherscan", calls_per_second=5, calls_per_day=100_000)
-        self.api_key = ETHERSCAN_API_KEY
 
     def _get_latest_block(self):
         self.rate_limiter.acquire()
         resp = self.client.get(ETHERSCAN_BASE_URL, params={
             "module": "proxy",
             "action": "eth_blockNumber",
-            "apikey": self.api_key,
+            "apikey": _get_api_key(),
         })
         data = resp.json()
         return int(data["result"], 16)
@@ -38,7 +48,7 @@ class EtherscanCollector(BaseCollector):
             "startblock": from_block,
             "endblock": to_block,
             "sort": "desc",
-            "apikey": self.api_key,
+            "apikey": _get_api_key(),
         })
         data = resp.json()
         if data["status"] == "1":
@@ -50,7 +60,7 @@ class EtherscanCollector(BaseCollector):
             return []
 
     def collect(self):
-        if not self.api_key:
+        if not _get_api_key():
             logger.warning("[etherscan] No API key configured, skipping")
             return
 

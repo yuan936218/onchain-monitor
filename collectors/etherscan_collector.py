@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from collectors.base import BaseCollector
 from database.connection import get_session
-from database.models import StablecoinTransfer, MonitoredAddress, WhaleMovement
+from database.models import StablecoinTransfer, MonitoredAddress, WhaleMovement, MintBurnEvent
 from database.queries import get_poll_state, update_poll_state
 from config.settings import ETHERSCAN_API_KEY, ETHERSCAN_BASE_URL, STABLECOIN_TOKENS
 from utils.address_labeler import resolve_label
@@ -207,6 +207,27 @@ class EtherscanCollector(BaseCollector):
                                 )
                                 session.add(whale)
                                 new_whale_moves += 1
+
+                        # Detect mint (from 0x0) or burn (to 0x0)
+                        zero_addr = "0x0000000000000000000000000000000000000000"
+                        if from_addr == zero_addr or to_addr == zero_addr:
+                            mint_exists = session.query(MintBurnEvent).filter(
+                                MintBurnEvent.tx_hash == tx_hash
+                            ).first()
+                            if not mint_exists:
+                                event_type = "mint" if from_addr == zero_addr else "burn"
+                                mint_event = MintBurnEvent(
+                                    tx_hash=tx_hash,
+                                    chain="ethereum",
+                                    token_symbol=symbol,
+                                    token_address=token_addr.lower(),
+                                    event_type=event_type,
+                                    value=value,
+                                    value_usd=value,
+                                    block_number=int(tx["blockNumber"]),
+                                    block_timestamp=datetime.utcfromtimestamp(int(tx["timeStamp"])),
+                                )
+                                session.add(mint_event)
                 except Exception as e:
                     api_errors += 1
                     logger.warning(f"[etherscan] Error fetching {symbol} for {addr.label}: {e}")

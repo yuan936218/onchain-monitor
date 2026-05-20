@@ -1,7 +1,7 @@
 """Whale movements tracking component — Chinese UI."""
 
 import streamlit as st
-from database.queries import get_whale_movements
+from database.queries import get_whale_movements, get_large_transfers
 from utils.formatters import format_usd, format_token_amount, format_timestamp, format_address
 
 
@@ -10,8 +10,29 @@ def render_whale_movements():
 
     movements = get_whale_movements(hours=24)
 
+    # Fall back to large transfers (>$10M) if no whale-specific records
     if not movements:
-        st.info("暂无巨鲸动向数据。已从链上监控地址库中自动检测鲸鱼相关交易 (无需额外 API Key)。")
+        large = get_large_transfers(hours=72, min_value_usd=10_000_000, token_filter=None)
+        if large:
+            st.caption("基于大额转账 (>$10M) 的巨鲸活动推断：")
+            for t in large[:15]:
+                from_info = t.from_label or format_address(t.from_address)
+                to_info = t.to_label or format_address(t.to_address)
+                direction = " ⚠️ → 交易所" if t.to_label else (" 📤 交易所 →" if t.from_label else "")
+
+                with st.container():
+                    st.markdown(
+                        f"**{format_token_amount(t.value, t.token_symbol)}** "
+                        f"({format_usd(t.value_usd)})"
+                    )
+                    st.caption(f"{from_info} → {to_info}{direction}")
+                    st.caption(f"{format_timestamp(t.detected_at)}")
+                    tx_url = f"https://etherscan.io/tx/{t.tx_hash}"
+                    st.link_button("↗ 查看交易", tx_url)
+                    st.divider()
+            return
+
+        st.info("暂无巨鲸动向数据。监控地址库中的鲸鱼地址 (Vitalik、Wintermute 等) 近期无交易所交互。")
         return
 
     for m in movements[:20]:
@@ -30,7 +51,7 @@ def render_whale_movements():
                 f"({format_usd(m.value_usd)})"
             )
             st.caption(f"{from_info} → {to_info}{direction}")
-            st.caption(f"{format_timestamp(m.block_timestamp)}")
+            st.caption(f"{format_timestamp(m.detected_at)}")
             tx_url = f"https://etherscan.io/tx/{m.tx_hash}"
             st.link_button("↗ 查看交易", tx_url)
             st.divider()

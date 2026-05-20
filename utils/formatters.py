@@ -1,5 +1,7 @@
 """Number formatting utilities for dashboard display."""
 
+from __future__ import annotations
+
 from config.settings import CHAIN_CONFIG
 
 

@@ -1,5 +1,7 @@
 """Resolve blockchain addresses to human-readable labels."""
 
+from __future__ import annotations
+
 from database.connection import get_session
 from database.models import MonitoredAddress
 

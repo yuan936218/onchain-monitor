@@ -1,5 +1,7 @@
 """CoinGecko price data collector."""
 
+from __future__ import annotations
+
 import logging
 from collectors.base import BaseCollector
 from utils.cache import TTLCache

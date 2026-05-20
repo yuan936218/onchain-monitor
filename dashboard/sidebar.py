@@ -114,10 +114,10 @@ def render_sidebar():
         st.subheader("⚡ 警报阈值")
         threshold_large = st.number_input(
             "大额转账阈值 (USD)",
-            min_value=100_000,
+            min_value=1_000_000,
             max_value=100_000_000,
             value=int(st.session_state.get("threshold_large", THRESHOLD_LARGE_TRANSFER)),
-            step=100_000,
+            step=1_000_000,
             format="%d",
         )
         st.session_state["threshold_large"] = threshold_large

@@ -188,6 +188,9 @@ def main():
         st.session_state["scheduler"] = None
     if "last_refresh" not in st.session_state:
         st.session_state["last_refresh"] = time.time()
+    # Auto-start collector on first load
+    if "collector_running" not in st.session_state:
+        st.session_state["collector_running"] = True
 
     # Start/stop collector
     if st.session_state.get("collector_running", False):

@@ -2,7 +2,7 @@
 
 import streamlit as st
 from database.queries import get_recent_alerts, acknowledge_alert
-from utils.formatters import format_timestamp, format_usd
+from utils.formatters import format_timestamp, format_usd, get_explorer_tx_url
 
 
 def render_alerts():
@@ -35,7 +35,7 @@ def render_alerts():
                 st.caption(f"{val_text} — {format_timestamp(alert.created_at)}")
             with col2:
                 if alert.related_tx_hash:
-                    tx_url = f"https://etherscan.io/tx/{alert.related_tx_hash}"
+                    tx_url = get_explorer_tx_url(alert.chain or "ethereum", alert.related_tx_hash)
                     st.link_button("↗ 查看", tx_url)
             with col3:
                 if not alert.is_acknowledged:

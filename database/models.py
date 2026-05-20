@@ -9,9 +9,10 @@ Base = declarative_base()
 
 class MonitoredAddress(Base):
     __tablename__ = "monitored_addresses"
+    __table_args__ = (UniqueConstraint("address", "chain", name="uq_address_chain"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    address = Column(String(42), nullable=False, unique=True)
+    address = Column(String(42), nullable=False)
     label = Column(String(100), nullable=False)
     category = Column(String(20), nullable=False)  # exchange, whale, contract, personal
     chain = Column(String(20), nullable=False, default="ethereum")
@@ -111,6 +112,7 @@ class Alert(Base):
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=False)
     related_tx_hash = Column(String(66))
+    chain = Column(String(20), nullable=True)
     value_usd = Column(Float)
     is_acknowledged = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -2,17 +2,20 @@
 
 import streamlit as st
 from database.queries import get_whale_movements, get_large_transfers
-from utils.formatters import format_usd, format_token_amount, format_timestamp, format_address
+from utils.formatters import format_usd, format_token_amount, format_timestamp, format_address, get_explorer_tx_url
 
 
 def render_whale_movements():
     st.subheader("🐋 巨鲸动向")
 
-    movements = get_whale_movements(hours=24)
+    sel_chain = st.session_state.get("selected_chain", "all")
+    chain = None if sel_chain == "all" else sel_chain
+
+    movements = get_whale_movements(hours=24, chain=chain)
 
     # Fall back to large transfers (>$10M) if no whale-specific records
     if not movements:
-        large = get_large_transfers(hours=72, min_value_usd=10_000_000, token_filter=None)
+        large = get_large_transfers(hours=72, min_value_usd=10_000_000, token_filter=None, chain=chain)
         if large:
             st.caption("基于大额转账 (>$10M) 的巨鲸活动推断：")
             for t in large[:15]:
@@ -27,7 +30,7 @@ def render_whale_movements():
                     )
                     st.caption(f"{from_info} → {to_info}{direction}")
                     st.caption(f"{format_timestamp(t.detected_at)}")
-                    tx_url = f"https://etherscan.io/tx/{t.tx_hash}"
+                    tx_url = get_explorer_tx_url(t.chain, t.tx_hash)
                     st.link_button("↗ 查看交易", tx_url)
                     st.divider()
             return
@@ -52,6 +55,6 @@ def render_whale_movements():
             )
             st.caption(f"{from_info} → {to_info}{direction}")
             st.caption(f"{format_timestamp(m.detected_at)}")
-            tx_url = f"https://etherscan.io/tx/{m.tx_hash}"
+            tx_url = get_explorer_tx_url(m.chain, m.tx_hash)
             st.link_button("↗ 查看交易", tx_url)
             st.divider()

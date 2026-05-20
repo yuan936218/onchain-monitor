@@ -31,16 +31,29 @@ def acknowledge_alert(alert_id):
         session.commit()
 
 
-def get_24h_aggregates():
+def get_24h_aggregates(chain=None):
     """Return inflow/outflow totals for last 24 hours."""
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=24)
 
-    # Get exchange addresses for matching (more reliable than label checks)
-    exchange_addrs = [a[0] for a in session.query(MonitoredAddress.address).filter(
+    addr_q = session.query(MonitoredAddress.address).filter(
         MonitoredAddress.category == "exchange",
         MonitoredAddress.is_active == True,
-    ).all()]
+    )
+    transfer_q = session.query(StablecoinTransfer).filter(
+        StablecoinTransfer.detected_at >= since,
+    )
+    mint_q = session.query(MintBurnEvent).filter(
+        MintBurnEvent.detected_at >= since,
+        MintBurnEvent.event_type == "mint",
+    )
+
+    if chain:
+        addr_q = addr_q.filter(MonitoredAddress.chain == chain)
+        transfer_q = transfer_q.filter(StablecoinTransfer.chain == chain)
+        mint_q = mint_q.filter(MintBurnEvent.chain == chain)
+
+    exchange_addrs = [a[0] for a in addr_q.all()]
 
     inflow = 0
     outflow = 0
@@ -48,29 +61,19 @@ def get_24h_aggregates():
     mint_count = 0
 
     if exchange_addrs:
-        inflow = session.query(func.sum(StablecoinTransfer.value_usd)).filter(
-            StablecoinTransfer.detected_at >= since,
-            StablecoinTransfer.to_address.in_(exchange_addrs),
+        inflow = transfer_q.filter(StablecoinTransfer.to_address.in_(exchange_addrs)).with_entities(
+            func.sum(StablecoinTransfer.value_usd)
         ).scalar() or 0
 
-        outflow = session.query(func.sum(StablecoinTransfer.value_usd)).filter(
-            StablecoinTransfer.detected_at >= since,
-            StablecoinTransfer.from_address.in_(exchange_addrs),
+        outflow = transfer_q.filter(StablecoinTransfer.from_address.in_(exchange_addrs)).with_entities(
+            func.sum(StablecoinTransfer.value_usd)
         ).scalar() or 0
 
-    large_tx_count = session.query(StablecoinTransfer).filter(
-        and_(
-            StablecoinTransfer.detected_at >= since,
-            StablecoinTransfer.value_usd >= 1_000_000,
-        )
+    large_tx_count = transfer_q.filter(
+        StablecoinTransfer.value_usd >= 1_000_000,
     ).count()
 
-    mint_count = session.query(MintBurnEvent).filter(
-        and_(
-            MintBurnEvent.detected_at >= since,
-            MintBurnEvent.event_type == "mint",
-        )
-    ).count()
+    mint_count = mint_q.count()
 
     return {
         "inflow": float(inflow),
@@ -81,25 +84,25 @@ def get_24h_aggregates():
     }
 
 
-def get_large_transfers(hours=24, min_value_usd=1_000_000, token_filter=None):
+def get_large_transfers(hours=24, min_value_usd=1_000_000, token_filter=None, chain=None):
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=hours)
 
     q = session.query(StablecoinTransfer).filter(
-        and_(
-            StablecoinTransfer.detected_at >= since,
-            StablecoinTransfer.value_usd >= min_value_usd,
-        )
+        StablecoinTransfer.detected_at >= since,
+        StablecoinTransfer.value_usd >= min_value_usd,
     )
 
     if token_filter and token_filter != "ALL":
         q = q.filter(StablecoinTransfer.token_symbol == token_filter)
+    if chain:
+        q = q.filter(StablecoinTransfer.chain == chain)
 
     return q.order_by(StablecoinTransfer.value_usd.desc()).limit(100).all()
 
 
 
-def get_exchange_flow_timeseries_by_exchange(hours=24):
+def get_exchange_flow_timeseries_by_exchange(hours=24, chain=None):
     """Return hourly inflow/outflow grouped by exchange name.
 
     Returns dict: exchange_name -> list[{hour, inflow, outflow, net_flow}]
@@ -107,10 +110,19 @@ def get_exchange_flow_timeseries_by_exchange(hours=24):
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=hours)
 
-    addresses = session.query(MonitoredAddress.address, MonitoredAddress.label).filter(
+    addr_q = session.query(MonitoredAddress.address, MonitoredAddress.label).filter(
         MonitoredAddress.category == "exchange",
         MonitoredAddress.is_active == True,
-    ).all()
+    )
+    transfer_q = session.query(StablecoinTransfer).filter(
+        StablecoinTransfer.detected_at >= since,
+    )
+
+    if chain:
+        addr_q = addr_q.filter(MonitoredAddress.chain == chain)
+        transfer_q = transfer_q.filter(StablecoinTransfer.chain == chain)
+
+    addresses = addr_q.all()
 
     if not addresses:
         return {}
@@ -124,9 +136,7 @@ def get_exchange_flow_timeseries_by_exchange(hours=24):
 
     exchange_set = set(address_to_exchange.keys())
 
-    transfers = session.query(StablecoinTransfer).filter(
-        StablecoinTransfer.detected_at >= since
-    ).all()
+    transfers = transfer_q.all()
 
     hourly = {}
     for t in transfers:
@@ -159,27 +169,35 @@ def get_exchange_flow_timeseries_by_exchange(hours=24):
     return result
 
 
-def get_whale_movements(hours=24):
+def get_whale_movements(hours=24, chain=None):
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=hours)
-    return session.query(WhaleMovement).filter(
+    q = session.query(WhaleMovement).filter(
         WhaleMovement.detected_at >= since
-    ).order_by(WhaleMovement.value_usd.desc()).all()
+    )
+    if chain:
+        q = q.filter(WhaleMovement.chain == chain)
+    return q.order_by(WhaleMovement.value_usd.desc()).all()
 
 
-def get_recent_mint_burns(hours=24):
+def get_recent_mint_burns(hours=24, chain=None):
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=hours)
-    return session.query(MintBurnEvent).filter(
+    q = session.query(MintBurnEvent).filter(
         MintBurnEvent.detected_at >= since
-    ).order_by(MintBurnEvent.detected_at.desc()).all()
+    )
+    if chain:
+        q = q.filter(MintBurnEvent.chain == chain)
+    return q.order_by(MintBurnEvent.detected_at.desc()).all()
 
 
-def get_active_monitored_addresses(category=None):
+def get_active_monitored_addresses(category=None, chain=None):
     session = get_session()
     q = session.query(MonitoredAddress).filter(MonitoredAddress.is_active == True)
     if category:
         q = q.filter(MonitoredAddress.category == category)
+    if chain:
+        q = q.filter(MonitoredAddress.chain == chain)
     return q.all()
 
 

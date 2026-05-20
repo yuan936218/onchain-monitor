@@ -57,7 +57,10 @@ def _build_flow_chart(df, title):
 def render_exchange_flow_chart():
     st.subheader("📈 交易所资金流向 (按小时)")
 
-    per_exchange = get_exchange_flow_timeseries_by_exchange(hours=24)
+    sel_chain = st.session_state.get("selected_chain", "all")
+    chain = None if sel_chain == "all" else sel_chain
+
+    per_exchange = get_exchange_flow_timeseries_by_exchange(hours=24, chain=chain)
 
     if not per_exchange:
         st.caption("暂无交易所流量数据，请先启动采集器。")

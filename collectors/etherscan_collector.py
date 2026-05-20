@@ -1,4 +1,4 @@
-"""Etherscan API collector for stablecoin transfers."""
+"""Etherscan API collector for stablecoin transfers — multi-chain support."""
 
 import os
 import logging
@@ -7,10 +7,12 @@ from collectors.base import BaseCollector
 from database.connection import get_session
 from database.models import StablecoinTransfer, MonitoredAddress, WhaleMovement, MintBurnEvent
 from database.queries import get_poll_state, update_poll_state
-from config.settings import ETHERSCAN_API_KEY, ETHERSCAN_BASE_URL, STABLECOIN_TOKENS
+from config.settings import ETHERSCAN_API_KEY, ETHERSCAN_BASE_URL, CHAIN_CONFIG, STABLECOIN_TOKENS
 from utils.address_labeler import resolve_label
 
 logger = logging.getLogger(__name__)
+
+SUPPORTED_CHAINS = ["ethereum", "arbitrum", "bsc"]
 
 
 def _get_api_key():
@@ -26,9 +28,9 @@ class EtherscanCollector(BaseCollector):
         self.last_stats = {}
         self.last_error = None
 
-    def _api_params(self, extra: dict = None) -> dict:
+    def _api_params(self, chain_id: str, extra: dict = None) -> dict:
         """Build API params with V2 chainid support."""
-        params = {"chainid": "1", "apikey": _get_api_key()}
+        params = {"chainid": chain_id, "apikey": _get_api_key()}
         if extra:
             params.update(extra)
         return params
@@ -38,7 +40,6 @@ class EtherscanCollector(BaseCollector):
         self.rate_limiter.acquire()
         resp = self.client.get(ETHERSCAN_BASE_URL, params=params)
         data = resp.json()
-        # status=1 means success, status=0 with result might be OK or error
         if data.get("status") == "1":
             return data
         elif data.get("status") == "0":
@@ -48,16 +49,22 @@ class EtherscanCollector(BaseCollector):
             if "deprecated" in msg.lower():
                 logger.warning(f"[etherscan] V1 deprecated, using V2 params: {msg}")
                 return data
-            return data  # could be legitimate empty result
+            return data
         return data
 
-    def _get_latest_block(self):
-        """Get latest block by checking a known active address's latest tx."""
-        # Use a Binance hot wallet which has frequent transactions
-        data = self._api_call(self._api_params({
+    _CHAIN_SAMPLE_ADDRESSES = {
+        "1": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",      # Binance 7 (Ethereum)
+        "42161": "0xB38e8c17e38363aF6EbdCb3dAE12e0243582891D",   # Binance 1 (Arbitrum)
+        "56": "0x8894E0a0c962CB723c1976a4421c95949bE2D4E3",      # Binance 1 (BSC)
+    }
+
+    def _get_latest_block(self, chain_id: str) -> int:
+        """Get latest block number for a chain."""
+        sample_addr = self._CHAIN_SAMPLE_ADDRESSES.get(chain_id, "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8")
+        data = self._api_call(self._api_params(chain_id, {
             "module": "account",
             "action": "txlist",
-            "address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",
+            "address": sample_addr,
             "startblock": 0,
             "endblock": 99999999,
             "page": 1,
@@ -68,9 +75,9 @@ class EtherscanCollector(BaseCollector):
             return int(data["result"][0]["blockNumber"])
         raise Exception(f"Cannot get latest block: {data}")
 
-    def _fetch_token_transfers(self, address: str, token_address: str, from_block: int, to_block: int):
+    def _fetch_token_transfers(self, address: str, token_address: str, from_block: int, to_block: int, chain_id: str):
         """Fetch ERC-20 token transfers for a specific address."""
-        data = self._api_call(self._api_params({
+        data = self._api_call(self._api_params(chain_id, {
             "module": "account",
             "action": "tokentx",
             "contractaddress": token_address,
@@ -92,69 +99,64 @@ class EtherscanCollector(BaseCollector):
             logger.warning(f"[etherscan] API error for {address}: {data.get('message', data)}")
             return []
 
-    def collect(self):
-        if not _get_api_key():
-            logger.warning("[etherscan] No API key configured, skipping")
-            self.last_error = "No API key configured"
-            return
-
-        session = get_session()
+    def _collect_chain(self, chain: str, session):
+        """Collect transfers for a single chain. Returns stats dict."""
+        chain_id = CHAIN_CONFIG[chain]["chain_id"]
+        tokens = STABLECOIN_TOKENS.get(chain, {})
+        if not tokens:
+            logger.info(f"[etherscan] No tokens configured for {chain}, skipping")
+            return {"chain": chain, "addresses": 0, "new_transfers": 0, "new_whale_moves": 0, "api_responses": 0, "api_errors": 0, "block_range": "N/A"}
 
         addresses = session.query(MonitoredAddress).filter(
             MonitoredAddress.is_active == True,
             MonitoredAddress.category == "exchange",
+            MonitoredAddress.chain == chain,
         ).all()
 
-        # Also load whale addresses for whale movement detection
         whale_addresses = session.query(MonitoredAddress).filter(
             MonitoredAddress.is_active == True,
             MonitoredAddress.category == "whale",
+            MonitoredAddress.chain == chain,
         ).all()
         whale_addr_set = {w.address.lower() for w in whale_addresses} if whale_addresses else set()
 
         if not addresses:
-            logger.warning("[etherscan] No monitored addresses found")
-            self.last_error = "No monitored addresses in database"
-            return
+            logger.info(f"[etherscan] No exchange addresses for {chain}, skipping")
+            return {"chain": chain, "addresses": 0, "new_transfers": 0, "new_whale_moves": 0, "api_responses": 0, "api_errors": 0, "block_range": "N/A"}
 
-        # Get latest block
         try:
-            latest_block = self._get_latest_block()
-            logger.info(f"[etherscan] Latest block: {latest_block}")
+            latest_block = self._get_latest_block(chain_id)
+            logger.info(f"[etherscan] {chain} latest block: {latest_block}")
         except Exception as e:
-            logger.error(f"[etherscan] Failed to get latest block: {e}")
-            self.last_error = f"Failed to get latest block: {str(e)[:200]}"
-            # Use a recent known block as fallback
-            latest_block = 22000000  # ~May 2026
-            logger.info(f"[etherscan] Using fallback block: {latest_block}")
+            logger.error(f"[etherscan] Failed to get latest block for {chain}: {e}")
+            return {"chain": chain, "addresses": len(addresses), "new_transfers": 0, "new_whale_moves": 0, "api_responses": 0, "api_errors": 1, "block_range": "error", "error": str(e)[:200]}
 
-        # Get poll state for resuming
-        poll_state = get_poll_state("etherscan_exchange_flows")
+        poll_state = get_poll_state(f"etherscan_{chain}")
         if poll_state:
             from_block = poll_state.last_block + 1
-            # Cap at 10,000 blocks behind to avoid excessive scanning
             if from_block < latest_block - 10_000:
                 from_block = latest_block - 10_000
         else:
-            # First run: scan a wide range (10,000 blocks ≈ 1.5 days)
             from_block = latest_block - 10_000
 
-        logger.info(f"[etherscan] Scanning blocks {from_block}-{latest_block} for {len(addresses)} addresses x {len(STABLECOIN_TOKENS)} tokens")
+        logger.info(f"[etherscan] {chain} scanning blocks {from_block}-{latest_block} for {len(addresses)} addresses x {len(tokens)} tokens")
 
         new_transfers = 0
         new_whale_moves = 0
         api_errors = 0
-        total_api_responses = 0
+        api_responses = 0
+
         for addr in addresses:
-            for symbol, token_addr in STABLECOIN_TOKENS.items():
+            for symbol, token_addr in tokens.items():
                 try:
                     transfers = self._fetch_token_transfers(
                         address=addr.address,
                         token_address=token_addr,
                         from_block=from_block,
                         to_block=latest_block,
+                        chain_id=chain_id,
                     )
-                    total_api_responses += 1
+                    api_responses += 1
                     for tx in transfers:
                         tx_hash = tx["hash"]
                         exists = session.query(StablecoinTransfer).filter(
@@ -169,13 +171,13 @@ class EtherscanCollector(BaseCollector):
 
                         transfer = StablecoinTransfer(
                             tx_hash=tx_hash,
-                            chain="ethereum",
+                            chain=chain,
                             token_symbol=symbol,
                             token_address=token_addr.lower(),
                             from_address=from_addr,
                             to_address=to_addr,
-                            from_label=resolve_label(from_addr),
-                            to_label=resolve_label(to_addr),
+                            from_label=resolve_label(from_addr, chain=chain),
+                            to_label=resolve_label(to_addr, chain=chain),
                             value=value,
                             value_usd=value,
                             block_number=int(tx["blockNumber"]),
@@ -186,7 +188,7 @@ class EtherscanCollector(BaseCollector):
                         session.add(transfer)
                         new_transfers += 1
 
-                        # Check if this transfer involves a whale address → record as whale movement
+                        # Whale detection
                         if whale_addr_set and (from_addr in whale_addr_set or to_addr in whale_addr_set):
                             whale_exists = session.query(WhaleMovement).filter(
                                 WhaleMovement.tx_hash == tx_hash
@@ -194,11 +196,11 @@ class EtherscanCollector(BaseCollector):
                             if not whale_exists:
                                 whale = WhaleMovement(
                                     tx_hash=tx_hash,
-                                    chain="ethereum",
+                                    chain=chain,
                                     from_address=from_addr,
                                     to_address=to_addr,
-                                    from_label=resolve_label(from_addr),
-                                    to_label=resolve_label(to_addr),
+                                    from_label=resolve_label(from_addr, chain=chain),
+                                    to_label=resolve_label(to_addr, chain=chain),
                                     asset=symbol,
                                     value=value,
                                     value_usd=value,
@@ -208,7 +210,7 @@ class EtherscanCollector(BaseCollector):
                                 session.add(whale)
                                 new_whale_moves += 1
 
-                        # Detect mint (from 0x0) or burn (to 0x0)
+                        # Mint/burn detection
                         zero_addr = "0x0000000000000000000000000000000000000000"
                         if from_addr == zero_addr or to_addr == zero_addr:
                             mint_exists = session.query(MintBurnEvent).filter(
@@ -218,7 +220,7 @@ class EtherscanCollector(BaseCollector):
                                 event_type = "mint" if from_addr == zero_addr else "burn"
                                 mint_event = MintBurnEvent(
                                     tx_hash=tx_hash,
-                                    chain="ethereum",
+                                    chain=chain,
                                     token_symbol=symbol,
                                     token_address=token_addr.lower(),
                                     event_type=event_type,
@@ -230,22 +232,62 @@ class EtherscanCollector(BaseCollector):
                                 session.add(mint_event)
                 except Exception as e:
                     api_errors += 1
-                    logger.warning(f"[etherscan] Error fetching {symbol} for {addr.label}: {e}")
+                    logger.warning(f"[etherscan] Error fetching {symbol} for {addr.label} on {chain}: {e}")
                     continue
 
-        session.commit()
-        update_poll_state("etherscan_exchange_flows", latest_block, datetime.utcnow())
+        update_poll_state(f"etherscan_{chain}", latest_block, datetime.utcnow())
 
-        self.last_stats = {
+        return {
+            "chain": chain,
             "addresses": len(addresses),
-            "whale_addresses": len(whale_addr_set),
-            "tokens_per_addr": len(STABLECOIN_TOKENS),
+            "tokens": len(tokens),
             "block_range": f"{from_block}-{latest_block}",
             "latest_block": latest_block,
             "new_transfers": new_transfers,
             "new_whale_moves": new_whale_moves,
-            "api_responses": total_api_responses,
+            "api_responses": api_responses,
             "api_errors": api_errors,
         }
-        self.last_error = None
-        logger.info(f"[etherscan] Collected {new_transfers} transfers + {new_whale_moves} whale moves from {len(addresses)} addresses")
+
+    def collect(self):
+        if not _get_api_key():
+            logger.warning("[etherscan] No API key configured, skipping")
+            self.last_error = "No API key configured"
+            return
+
+        session = get_session()
+
+        all_chain_stats = []
+        total_transfers = 0
+        total_whale_moves = 0
+        total_api_responses = 0
+        total_api_errors = 0
+        failed_chains = []
+
+        for chain in SUPPORTED_CHAINS:
+            try:
+                stats = self._collect_chain(chain, session)
+                all_chain_stats.append(stats)
+                total_transfers += stats["new_transfers"]
+                total_whale_moves += stats["new_whale_moves"]
+                total_api_responses += stats["api_responses"]
+                total_api_errors += stats["api_errors"]
+                if stats.get("error"):
+                    failed_chains.append(f"{chain}: {stats['error']}")
+            except Exception as e:
+                logger.error(f"[etherscan] Failed collecting {chain}: {e}")
+                failed_chains.append(f"{chain}: {str(e)[:200]}")
+
+        session.commit()
+
+        self.last_stats = {
+            "chains": len(SUPPORTED_CHAINS),
+            "total_addresses": sum(s["addresses"] for s in all_chain_stats),
+            "chain_details": all_chain_stats,
+            "total_new_transfers": total_transfers,
+            "total_new_whale_moves": total_whale_moves,
+            "total_api_responses": total_api_responses,
+            "total_api_errors": total_api_errors,
+        }
+        self.last_error = "; ".join(failed_chains) if failed_chains else None
+        logger.info(f"[etherscan] Collected {total_transfers} transfers + {total_whale_moves} whale moves across {len(SUPPORTED_CHAINS)} chains")

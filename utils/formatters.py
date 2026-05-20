@@ -1,5 +1,7 @@
 """Number formatting utilities for dashboard display."""
 
+from config.settings import CHAIN_CONFIG
+
 
 def format_usd(value: float | None) -> str:
     """Format a USD value in human-readable form."""
@@ -38,3 +40,9 @@ def format_timestamp(ts) -> str:
     if ts is None:
         return "-"
     return ts.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def get_explorer_tx_url(chain: str, tx_hash: str) -> str:
+    """Build a block explorer transaction URL for the given chain."""
+    base = CHAIN_CONFIG.get(chain, {}).get("explorer", "https://etherscan.io")
+    return f"{base}/tx/{tx_hash}"

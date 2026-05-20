@@ -52,7 +52,8 @@ def seed_addresses():
         for category, addresses in categories.items():
             for addr in addresses:
                 exists = session.query(MonitoredAddress).filter(
-                    MonitoredAddress.address == addr["address"].lower()
+                    MonitoredAddress.address == addr["address"].lower(),
+                    MonitoredAddress.chain == chain,
                 ).first()
                 if exists:
                     continue
@@ -228,15 +229,20 @@ def main():
                 st.error(f"⚠️ 采集异常: {last_result['error']}")
             elif last_result and last_result.get("etherscan") == "success":
                 stats = last_result.get("stats") or {}
-                transfers = stats.get("new_transfers", 0)
-                blocks = stats.get("block_range", "?")
-                addrs = stats.get("addresses", 0)
+                transfers = stats.get("total_new_transfers", 0)
+                addrs = stats.get("total_addresses", 0)
+                chains = stats.get("chains", 1)
                 alerts = last_result.get("alerts", 0)
+                chain_details = stats.get("chain_details", [])
                 detail_parts = [f"最近更新: {elapsed:.0f}秒前"]
+                detail_parts.append(f"{chains} 条链")
                 if transfers > 0:
                     detail_parts.append(f"新增 {transfers} 笔转账")
                 else:
-                    detail_parts.append(f"扫描 {addrs} 个地址无新转账 (区块 {blocks})")
+                    detail_parts.append(f"扫描 {addrs} 个地址无新转账")
+                if chain_details:
+                    for cd in chain_details:
+                        detail_parts.append(f"{cd['chain']}: {cd.get('new_transfers', 0)}笔 (区块 {cd.get('block_range', '?')})")
                 if alerts > 0:
                     detail_parts.append(f"触发 {alerts} 个警报")
                 st.success(f"✅ 数据采集正常 ({', '.join(detail_parts)})")

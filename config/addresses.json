@@ -31,5 +31,30 @@
             {"address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8", "label": "Binance Cold", "notes": "Binance cold storage (duplicate tracking)"},
             {"address": "0xD1669f4b5E115d8B0Ce93AE8768f00A3Fe238E7a", "label": "Wintermute", "notes": "Major market maker"}
         ]
+    },
+    "arbitrum": {
+        "exchanges": [
+            {"address": "0xB38e8c17e38363aF6EbdCb3dAE12e0243582891D", "label": "Binance 1", "notes": "Binance Arbitrum hot wallet"},
+            {"address": "0xe29E90CA677A5ed6Ff7c810b68AD89cfB9B4eA0E", "label": "OKX 1", "notes": "OKX Arbitrum hot wallet"},
+            {"address": "0xEf8801eaf234ff82801821FFe2d78D60a0237F97", "label": "Bybit 1", "notes": "Bybit Arbitrum hot wallet"},
+            {"address": "0x62383739D68Dd0F844103Db8dFAe33eBbA8140E3", "label": "HTX 1", "notes": "HTX Arbitrum hot wallet"},
+            {"address": "0xc9440732A0D95CdF7C3B9E82C7B4CDc56bF3492D", "label": "KuCoin 1", "notes": "KuCoin Arbitrum hot wallet"},
+            {"address": "0x0D0707963952f2fBA59dD06f2b425ace40b492Fe", "label": "Gate.io 1", "notes": "Gate.io Arbitrum hot wallet"}
+        ],
+        "whales": [
+            {"address": "0xD1669f4b5E115d8B0Ce93AE8768f00A3Fe238E7a", "label": "Wintermute", "notes": "Major market maker"}
+        ]
+    },
+    "bsc": {
+        "exchanges": [
+            {"address": "0x8894E0a0c962CB723c1976a4421c95949bE2D4E3", "label": "Binance 1", "notes": "Binance BSC hot wallet"},
+            {"address": "0x29bDfB7D2746024d3fE9c09879A211e3Ef1eD00e", "label": "Binance 2", "notes": "Binance BSC deposit"},
+            {"address": "0x631Fc1EA2270e98fbD9D92658eCe0F7a269Aa161", "label": "Binance 3", "notes": "Binance BSC hot wallet"},
+            {"address": "0xEeeee7Cc39135E85D7E99AA4a6d9253f27fdBbb2", "label": "OKX 1", "notes": "OKX BSC hot wallet"},
+            {"address": "0x40E41127A68f7b92efA3B49dEf3b91F4EaA3d70C", "label": "HTX 1", "notes": "HTX BSC hot wallet"},
+            {"address": "0xe293D0E31FdbD4A07A5300dfF8bf66A1A22618fA0", "label": "KuCoin 1", "notes": "KuCoin BSC hot wallet"},
+            {"address": "0x118E9Db5E4c0eb4c3Ec13bA86c7b85AfDfc096DB", "label": "Gate.io 1", "notes": "Gate.io BSC hot wallet"}
+        ],
+        "whales": []
     }
 }

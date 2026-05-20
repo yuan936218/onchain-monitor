@@ -3,6 +3,7 @@
 import os
 import logging
 from collectors.base import make_client
+from utils.formatters import get_explorer_tx_url
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,10 @@ def send_alert(alert):
     color = SEVERITY_COLORS.get(alert.severity, "grey")
     severity_labels = {"critical": "严重", "warning": "警告", "info": "提示"}
 
-    etherscan_link = ""
+    tx_link = ""
     if alert.related_tx_hash:
-        etherscan_link = f"\n[查看交易](https://etherscan.io/tx/{alert.related_tx_hash})"
+        url = get_explorer_tx_url(alert.chain or "ethereum", alert.related_tx_hash)
+        tx_link = f"\n[查看交易]({url})"
 
     card = {
         "msg_type": "interactive",
@@ -36,7 +38,7 @@ def send_alert(alert):
             "elements": [
                 {
                     "tag": "markdown",
-                    "content": alert.description + etherscan_link,
+                    "content": alert.description + tx_link,
                 },
                 {
                     "tag": "note",

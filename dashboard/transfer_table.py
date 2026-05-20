@@ -3,11 +3,14 @@
 import streamlit as st
 import pandas as pd
 from database.queries import get_large_transfers
-from utils.formatters import format_usd, format_token_amount, format_timestamp, format_address
+from utils.formatters import format_usd, format_token_amount, format_timestamp, format_address, get_explorer_tx_url
 
 
 def render_transfer_table():
     st.subheader("📋 大额转账记录")
+
+    sel_chain = st.session_state.get("selected_chain", "all")
+    chain = None if sel_chain == "all" else sel_chain
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -23,7 +26,7 @@ def render_transfer_table():
             value=100_000, step=10_000, format="%d",
         )
 
-    transfers = get_large_transfers(hours=hours, min_value_usd=min_val, token_filter=token_filter)
+    transfers = get_large_transfers(hours=hours, min_value_usd=min_val, token_filter=token_filter, chain=chain)
 
     if not transfers:
         st.info("当前筛选条件下没有找到大额转账记录。")
@@ -40,7 +43,7 @@ def render_transfer_table():
             "接收方": to_info,
             "数量": format_token_amount(t.value, t.token_symbol),
             "美元价值": format_usd(t.value_usd),
-            "交易": f"https://etherscan.io/tx/{t.tx_hash}",
+            "交易": get_explorer_tx_url(t.chain, t.tx_hash),
         })
 
     df = pd.DataFrame(rows)

@@ -12,6 +12,17 @@ def render_sidebar():
     with st.sidebar:
         st.header("⚙️ 设置")
 
+        # ── Chain selector ──
+        chain_options = {"all": "全部链", "ethereum": "Ethereum", "arbitrum": "Arbitrum", "bsc": "BSC"}
+        selected_chain = st.selectbox(
+            "⛓️ 监控链",
+            options=list(chain_options.keys()),
+            format_func=lambda x: chain_options[x],
+            key="selected_chain",
+        )
+
+        st.divider()
+
         # ── Status indicator ──
         running = st.session_state.get("collector_running", True)
         st.caption(f"采集状态: {'🟢 运行中' if running else '⏸️ 已暂停'}")

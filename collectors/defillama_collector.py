@@ -5,7 +5,7 @@ from datetime import datetime
 from collectors.base import BaseCollector
 from database.connection import get_session
 from database.models import MintBurnEvent
-from config.settings import STABLECOIN_TOKENS
+from config.settings import get_tokens_for_chain
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class DefiLlamaCollector(BaseCollector):
 
                 # Only record events > $1M
                 if abs_delta >= 1_000_000:
-                    token_addr = STABLECOIN_TOKENS.get(token_name.upper(), "")
+                    token_addr = get_tokens_for_chain("ethereum").get(token_name.upper(), "")
                     event = MintBurnEvent(
                         tx_hash=f"defillama_{token_name}_{datetime.utcnow().timestamp()}",
                         chain="ethereum",

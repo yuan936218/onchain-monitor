@@ -53,6 +53,7 @@ def rule_large_exchange_inflow():
                 f"(约 ${tx.value_usd:,.0f} USD)。可能预示抛售压力，注意风险。"
             ),
             related_tx_hash=tx.tx_hash,
+            chain=tx.chain,
             value_usd=tx.value_usd,
         )
         session.add(alert)
@@ -94,6 +95,7 @@ def rule_large_transfer():
                 f"从 {from_info} 至 {to_info} ({direction})。"
             ),
             related_tx_hash=tx.tx_hash,
+            chain=tx.chain,
             value_usd=tx.value_usd,
         )
         session.add(alert)

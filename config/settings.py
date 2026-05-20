@@ -45,13 +45,44 @@ DEFAULT_POLL_INTERVAL_SECONDS = int(_get_config("POLL_INTERVAL", "120"))
 # Data retention (days)
 DATA_RETENTION_DAYS = int(_get_config("DATA_RETENTION_DAYS", "90"))
 
-# Stablecoin contract addresses (Ethereum mainnet)
+# Stablecoin contract addresses
 STABLECOIN_TOKENS = {
-    "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-    "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "ethereum": {
+        "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    },
+    "arbitrum": {
+        "USDT": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+        "USDC": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+    },
+    "bsc": {
+        "USDT": "0x55d398326f99059fF775485246999027B3197955",
+        "USDC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    },
 }
 
 STABLECOIN_ISSUERS = {
-    "USDT": "0xC6CDE7C39eB2f0F0095F41570af89eFC2C1Ea828",
-    "USDC": "0x55FE002aefF02F77364de339a1292923A15844B8",
+    "ethereum": {
+        "USDT": "0xC6CDE7C39eB2f0F0095F41570af89eFC2C1Ea828",
+        "USDC": "0x55FE002aefF02F77364de339a1292923A15844B8",
+    },
+    "arbitrum": {
+        "USDT": "0xC6CDE7C39eB2f0F0095F41570af89eFC2C1Ea828",
+        "USDC": "0x55FE002aefF02F77364de339a1292923A15844B8",
+    },
+    "bsc": {
+        "USDT": "0xC6CDE7C39eB2f0F0095F41570af89eFC2C1Ea828",
+        "USDC": "0x55FE002aefF02F77364de339a1292923A15844B8",
+    },
 }
+
+CHAIN_CONFIG = {
+    "ethereum": {"chain_id": "1", "explorer": "https://etherscan.io", "label": "Ethereum"},
+    "arbitrum": {"chain_id": "42161", "explorer": "https://arbiscan.io", "label": "Arbitrum"},
+    "bsc": {"chain_id": "56", "explorer": "https://bscscan.com", "label": "BSC"},
+}
+
+
+def get_tokens_for_chain(chain: str) -> dict:
+    """Get stablecoin token addresses for a specific chain."""
+    return STABLECOIN_TOKENS.get(chain, {})

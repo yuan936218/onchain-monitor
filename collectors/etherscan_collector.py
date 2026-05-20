@@ -25,50 +25,54 @@ class EtherscanCollector(BaseCollector):
     def __init__(self):
         super().__init__(name="etherscan", calls_per_second=5, calls_per_day=100_000)
 
+    def _api_params(self, extra: dict = None) -> dict:
+        """Build API params with V2 chainid support."""
+        params = {"chainid": "1", "apikey": _get_api_key()}
+        if extra:
+            params.update(extra)
+        return params
+
     def _api_call(self, params: dict):
-        """Make an Etherscan API call with V2 compatibility."""
+        """Make an Etherscan API call."""
         self.rate_limiter.acquire()
         resp = self.client.get(ETHERSCAN_BASE_URL, params=params)
         data = resp.json()
-
-        # V1 requires status=1, V2 requires status=0 for error
-        if data.get("status") == "1" or data.get("status") == "0":
+        # status=1 means success, status=0 with result might be OK or error
+        if data.get("status") == "1":
             return data
-        else:
-            logger.warning(f"[etherscan] API returned: {data}")
-            return data
+        elif data.get("status") == "0":
+            msg = str(data.get("message", ""))
+            if "No transactions" in msg or "No records" in msg:
+                return data
+            if "deprecated" in msg.lower():
+                logger.warning(f"[etherscan] V1 deprecated, using V2 params: {msg}")
+                return data
+            return data  # could be legitimate empty result
+        return data
 
     def _get_latest_block(self):
-        """Get latest block using Etherscan block module (works with free keys)."""
-        # Use block/getblocknobytime with current timestamp to get latest block
+        """Get latest block using block module (free API compatible)."""
         now_ts = int(time.time())
-        self.rate_limiter.acquire()
-        resp = self.client.get(ETHERSCAN_BASE_URL, params={
+        data = self._api_call(self._api_params({
             "module": "block",
             "action": "getblocknobytime",
             "timestamp": now_ts,
             "closest": "before",
-            "apikey": _get_api_key(),
-        })
-        data = resp.json()
+        }))
         if data.get("status") == "1" and data.get("result"):
             return int(data["result"])
-        # Fallback: try proxy module (requires PRO key, might fail)
-        logger.warning(f"[etherscan] block module failed: {data}, trying proxy...")
-        self.rate_limiter.acquire()
-        resp2 = self.client.get(ETHERSCAN_BASE_URL, params={
+        # Fallback: try proxy
+        data2 = self._api_call(self._api_params({
             "module": "proxy",
             "action": "eth_blockNumber",
-            "apikey": _get_api_key(),
-        })
-        data2 = resp2.json()
+        }))
         if data2.get("result") and isinstance(data2["result"], str):
             return int(data2["result"], 16)
-        raise Exception(f"Cannot get latest block: {data2}")
+        raise Exception(f"Cannot get latest block: {data}")
 
     def _fetch_token_transfers(self, address: str, token_address: str, from_block: int, to_block: int):
         """Fetch ERC-20 token transfers for a specific address."""
-        params = {
+        data = self._api_call(self._api_params({
             "module": "account",
             "action": "tokentx",
             "contractaddress": token_address,
@@ -76,17 +80,15 @@ class EtherscanCollector(BaseCollector):
             "startblock": from_block,
             "endblock": to_block,
             "sort": "desc",
-            "apikey": _get_api_key(),
-        }
-        data = self._api_call(params)
-        if data.get("status") == "1":
+        }))
+        if data.get("status") == "1" and isinstance(data.get("result"), list):
             return data["result"]
-        elif "No transactions found" in str(data.get("message", "")):
+        elif "No transactions" in str(data.get("message", "")):
             return []
-        elif data.get("status") == "0" and data.get("result"):
-            # V2 API: status=0 with result might still mean no data
-            if isinstance(data["result"], list):
-                return data["result"]
+        elif data.get("status") == "0":
+            result = data.get("result")
+            if isinstance(result, list):
+                return result
             return []
         else:
             logger.warning(f"[etherscan] API error for {address}: {data.get('message', data)}")

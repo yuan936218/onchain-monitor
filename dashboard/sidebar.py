@@ -33,6 +33,7 @@ def render_sidebar():
                     client = make_client(timeout=15)
                     # Test with block/getblocknobytime (works with free keys)
                     resp = client.get("https://api.etherscan.io/api", params={
+                        "chainid": "1",
                         "module": "block",
                         "action": "getblocknobytime",
                         "timestamp": int(time.time()),

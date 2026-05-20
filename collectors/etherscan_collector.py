@@ -1,7 +1,6 @@
 """Etherscan API collector for stablecoin transfers."""
 
 import os
-import time
 import logging
 from datetime import datetime
 from collectors.base import BaseCollector
@@ -51,23 +50,20 @@ class EtherscanCollector(BaseCollector):
         return data
 
     def _get_latest_block(self):
-        """Get latest block using block module (free API compatible)."""
-        now_ts = int(time.time())
+        """Get latest block by checking a known active address's latest tx."""
+        # Use a Binance hot wallet which has frequent transactions
         data = self._api_call(self._api_params({
-            "module": "block",
-            "action": "getblocknobytime",
-            "timestamp": now_ts,
-            "closest": "before",
+            "module": "account",
+            "action": "txlist",
+            "address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",
+            "startblock": 0,
+            "endblock": 99999999,
+            "page": 1,
+            "offset": 1,
+            "sort": "desc",
         }))
-        if data.get("status") == "1" and data.get("result"):
-            return int(data["result"])
-        # Fallback: try proxy
-        data2 = self._api_call(self._api_params({
-            "module": "proxy",
-            "action": "eth_blockNumber",
-        }))
-        if data2.get("result") and isinstance(data2["result"], str):
-            return int(data2["result"], 16)
+        if data.get("status") == "1" and isinstance(data.get("result"), list) and data["result"]:
+            return int(data["result"][0]["blockNumber"])
         raise Exception(f"Cannot get latest block: {data}")
 
     def _fetch_token_transfers(self, address: str, token_address: str, from_block: int, to_block: int):

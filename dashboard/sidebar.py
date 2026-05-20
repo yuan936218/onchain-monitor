@@ -31,23 +31,27 @@ def render_sidebar():
                 from collectors.base import make_client
                 try:
                     client = make_client(timeout=15)
-                    # Test with block/getblocknobytime (works with free keys)
+                    # Test with account/txlist — guaranteed to work with free keys
                     resp = client.get("https://api.etherscan.io/api", params={
                         "chainid": "1",
-                        "module": "block",
-                        "action": "getblocknobytime",
-                        "timestamp": int(time.time()),
-                        "closest": "before",
+                        "module": "account",
+                        "action": "txlist",
+                        "address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",  # Binance wallet
+                        "startblock": 0,
+                        "endblock": 99999999,
+                        "page": 1,
+                        "offset": 1,
+                        "sort": "desc",
                         "apikey": etherscan_key,
                     })
                     data = resp.json()
-                    if data.get("status") == "1" and data.get("result"):
-                        block = int(data["result"])
-                        st.success(f"✅ API Key 有效！当前区块: {block:,}")
+                    if data.get("status") == "1" and isinstance(data.get("result"), list):
+                        block = int(data["result"][0]["blockNumber"]) if data["result"] else 0
+                        st.success(f"✅ API Key 有效！最新交易区块: {block:,}")
                     elif data.get("message") == "NOTOK":
-                        st.error("❌ API Key 无效，请检查是否复制完整（34位字符）")
-                    elif data.get("message") == "OK" and data.get("status") == "0":
-                        st.warning(f"⚠️ API 返回异常: {data.get('result', '未知')}")
+                        st.error(f"❌ API Key 无效: {data.get('result', '请检查Key是否正确')}")
+                    elif data.get("result") and isinstance(data["result"], str):
+                        st.warning(f"⚠️ 返回: {data['result'][:200]}")
                     else:
                         st.error(f"❌ API 返回: {data.get('message', str(data)[:200])}")
                 except Exception as e:

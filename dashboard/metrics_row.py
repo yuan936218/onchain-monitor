@@ -8,6 +8,46 @@ from utils.formatters import format_usd
 def render_metrics():
     st.subheader("📊 关键指标 (最近24小时)")
 
+    # ── Debug: show actual database state ──
+    with st.expander("🔧 数据库诊断", expanded=False):
+        from database.connection import get_session
+        from database.models import StablecoinTransfer, Alert, MonitoredAddress
+        from sqlalchemy import func
+        s = get_session()
+        total_tx = s.query(func.count(StablecoinTransfer.id)).scalar()
+        total_alerts = s.query(func.count(Alert.id)).scalar()
+        total_addrs = s.query(func.count(MonitoredAddress.id)).filter(MonitoredAddress.is_active == True).scalar()
+        exchange_addrs = s.query(MonitoredAddress.address).filter(
+            MonitoredAddress.category == "exchange", MonitoredAddress.is_active == True
+        ).all()
+        exchange_addrs_list = [a[0] for a in exchange_addrs]
+
+        st.caption(f"数据库: {total_tx} 笔转账 | {total_alerts} 条警报 | {total_addrs} 个监控地址 (其中 {len(exchange_addrs_list)} 个交易所)")
+
+        if total_tx > 0:
+            # Show most recent transfers
+            latest = s.query(StablecoinTransfer).order_by(StablecoinTransfer.detected_at.desc()).limit(5).all()
+            st.caption("最近5笔转账:")
+            for t in latest:
+                st.caption(
+                    f"  {t.token_symbol} {t.value:,.2f} | "
+                    f"from={t.from_address[:10]}... to={t.to_address[:10]}... | "
+                    f"from_label={t.from_label} to_label={t.to_label} | "
+                    f"block={t.block_number} ts={t.block_timestamp} | "
+                    f"detected={t.detected_at}"
+                )
+
+            # Check if exchange addresses match
+            if exchange_addrs_list:
+                sample_exchange = exchange_addrs_list[0]
+                count_to_exchange = s.query(func.count(StablecoinTransfer.id)).filter(
+                    StablecoinTransfer.to_address == sample_exchange
+                ).scalar()
+                st.caption(f"示例: 转入 {sample_exchange[:10]}... 的交易数 = {count_to_exchange}")
+
+        if total_tx == 0 and total_alerts > 0:
+            st.warning("⚠️ 异常: 警报存在但转账记录为空！请检查采集器日志。")
+
     agg = get_24h_aggregates()
 
     col1, col2, col3, col4, col5 = st.columns(5)

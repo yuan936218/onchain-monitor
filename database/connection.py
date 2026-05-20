@@ -4,7 +4,9 @@ import os
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, scoped_session
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "onchain_monitor.db")
+DB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+os.makedirs(DB_DIR, exist_ok=True)
+DB_PATH = os.path.join(DB_DIR, "onchain_monitor.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(

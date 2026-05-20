@@ -48,7 +48,7 @@ def render_exchange_flow_chart():
     ))
 
     # Zero reference line
-    fig.add_hline(y=0, line_dash="dot", line_color="#6b7280", opacity=0.4)
+    fig.add_hline(y=0, line_dash="dot", line_color="#6b7280", opacity=0.4, yref="y2")
 
     fig.update_layout(
         barmode="group",
@@ -70,7 +70,9 @@ def render_exchange_flow_chart():
     total_net = df["net_flow"].sum()
     if total_net > 0:
         st.caption(f"📊 24h 净流出 {total_net:+,.0f} USD → 资金倾向流出交易所（囤币信号）")
-    else:
+    elif total_net < 0:
         st.caption(f"📊 24h 净流入 {total_net:+,.0f} USD → 资金倾向流入交易所（潜在抛压）")
+    else:
+        st.caption("📊 24h 净流量 0 USD → 交易所资金流向平衡")
 
     st.plotly_chart(fig, use_container_width=True)

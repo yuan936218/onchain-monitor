@@ -123,9 +123,14 @@ class EtherscanCollector(BaseCollector):
 
         # Get poll state for resuming
         poll_state = get_poll_state("etherscan_exchange_flows")
-        from_block = (poll_state.last_block + 1) if poll_state else latest_block - 500
-        if from_block < latest_block - 2000:
-            from_block = latest_block - 500
+        if poll_state:
+            from_block = poll_state.last_block + 1
+            # Cap at 10,000 blocks behind to avoid excessive scanning
+            if from_block < latest_block - 10_000:
+                from_block = latest_block - 10_000
+        else:
+            # First run: scan a wide range (10,000 blocks ≈ 1.5 days)
+            from_block = latest_block - 10_000
 
         logger.info(f"[etherscan] Scanning blocks {from_block}-{latest_block} for {len(addresses)} addresses x {len(STABLECOIN_TOKENS)} tokens")
 

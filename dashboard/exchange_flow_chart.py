@@ -48,7 +48,7 @@ def render_exchange_flow_chart():
     ))
 
     # Zero reference line
-    fig.add_hline(y=0, line_dash="dot", line_color="#6b7280", opacity=0.4, yaxis="y2")
+    fig.add_hline(y=0, line_dash="dot", line_color="#6b7280", opacity=0.4)
 
     fig.update_layout(
         barmode="group",

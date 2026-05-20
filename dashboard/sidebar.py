@@ -27,20 +27,28 @@ def render_sidebar():
 
         if st.button("🧪 测试 API Key", help="验证 Etherscan API Key 是否有效"):
             if etherscan_key:
-                import httpx
+                import httpx, time
                 from collectors.base import make_client
                 try:
                     client = make_client(timeout=15)
+                    # Test with block/getblocknobytime (works with free keys)
                     resp = client.get("https://api.etherscan.io/api", params={
-                        "module": "proxy", "action": "eth_blockNumber",
+                        "module": "block",
+                        "action": "getblocknobytime",
+                        "timestamp": int(time.time()),
+                        "closest": "before",
                         "apikey": etherscan_key,
                     })
                     data = resp.json()
-                    if data.get("result") and data["result"].startswith("0x"):
-                        block = int(data["result"], 16)
+                    if data.get("status") == "1" and data.get("result"):
+                        block = int(data["result"])
                         st.success(f"✅ API Key 有效！当前区块: {block:,}")
+                    elif data.get("message") == "NOTOK":
+                        st.error("❌ API Key 无效，请检查是否复制完整（34位字符）")
+                    elif data.get("message") == "OK" and data.get("status") == "0":
+                        st.warning(f"⚠️ API 返回异常: {data.get('result', '未知')}")
                     else:
-                        st.error(f"❌ API 返回异常: {data.get('message', data.get('result', '未知错误'))}")
+                        st.error(f"❌ API 返回: {data.get('message', str(data)[:200])}")
                 except Exception as e:
                     st.error(f"❌ 连接失败: {str(e)[:200]}")
             else:

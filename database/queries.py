@@ -1,5 +1,6 @@
 """Pre-built queries used by dashboard components."""
 
+import re
 from datetime import datetime, timedelta
 from sqlalchemy import func, and_
 from database.models import (
@@ -97,40 +98,65 @@ def get_large_transfers(hours=24, min_value_usd=1_000_000, token_filter=None):
     return q.order_by(StablecoinTransfer.value_usd.desc()).limit(100).all()
 
 
-def get_exchange_flow_timeseries(hours=24):
-    """Return hourly exchange inflow/outflow for the last N hours."""
+
+def get_exchange_flow_timeseries_by_exchange(hours=24):
+    """Return hourly inflow/outflow grouped by exchange name.
+
+    Returns dict: exchange_name -> list[{hour, inflow, outflow, net_flow}]
+    """
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=hours)
 
-    # Get exchange addresses
-    exchange_addrs = [a[0] for a in session.query(MonitoredAddress.address).filter(
+    addresses = session.query(MonitoredAddress.address, MonitoredAddress.label).filter(
         MonitoredAddress.category == "exchange",
         MonitoredAddress.is_active == True,
-    ).all()]
+    ).all()
 
-    if not exchange_addrs:
-        return []
+    if not addresses:
+        return {}
+
+    address_to_exchange = {}
+    for addr, label in addresses:
+        exchange_name = re.sub(r'\s+\d+$', '', label).strip()
+        if not exchange_name:
+            continue
+        address_to_exchange[addr] = exchange_name
+
+    exchange_set = set(address_to_exchange.keys())
 
     transfers = session.query(StablecoinTransfer).filter(
         StablecoinTransfer.detected_at >= since
     ).all()
 
-    # Group by hour, matching against exchange address list directly
     hourly = {}
-    exchange_set = set(exchange_addrs)
     for t in transfers:
         hour_key = t.detected_at.replace(minute=0, second=0, microsecond=0)
         if hour_key not in hourly:
-            hourly[hour_key] = {"inflow": 0, "outflow": 0}
-        if t.to_address in exchange_set:
-            hourly[hour_key]["inflow"] += t.value_usd or 0
-        if t.from_address in exchange_set:
-            hourly[hour_key]["outflow"] += t.value_usd or 0
+            hourly[hour_key] = {}
 
-    return sorted(
-        [{"hour": k, **v} for k, v in hourly.items()],
-        key=lambda x: x["hour"]
-    )
+        if t.to_address in exchange_set:
+            name = address_to_exchange[t.to_address]
+            hourly[hour_key].setdefault(name, {"inflow": 0, "outflow": 0})
+            hourly[hour_key][name]["inflow"] += t.value_usd or 0
+
+        if t.from_address in exchange_set:
+            name = address_to_exchange[t.from_address]
+            hourly[hour_key].setdefault(name, {"inflow": 0, "outflow": 0})
+            hourly[hour_key][name]["outflow"] += t.value_usd or 0
+
+    result = {}
+    for hour_key, exchanges in sorted(hourly.items()):
+        for name, flows in exchanges.items():
+            if name not in result:
+                result[name] = []
+            result[name].append({
+                "hour": hour_key,
+                "inflow": flows["inflow"],
+                "outflow": flows["outflow"],
+                "net_flow": flows["outflow"] - flows["inflow"],
+            })
+
+    return result
 
 
 def get_whale_movements(hours=24):

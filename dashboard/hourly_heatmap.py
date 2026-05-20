@@ -4,7 +4,6 @@ import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
-from database.queries import get_hourly_flow_patterns
 
 
 # Trading session zones (UTC hours)
@@ -16,6 +15,8 @@ SESSIONS = [
 
 
 def render_hourly_heatmap():
+    from database.queries import get_hourly_flow_patterns
+
     st.subheader("⏰ 时间规律分析")
 
     sel_chain = st.session_state.get("selected_chain", "all")

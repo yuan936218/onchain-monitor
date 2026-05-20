@@ -31,3 +31,4 @@
 - Notifications via **Feishu (飞书)** webhook, NOT Telegram
 - User is a crypto futures trader, not a developer ("我不懂代码")
 - User is in China — GitHub HTTPS often blocked by GFW, use SSH
+- Claude must respond in **Chinese only** at all times

@@ -3,11 +3,12 @@
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
-from database.queries import get_exchange_balance_timeseries
 from utils.formatters import format_usd
 
 
 def render_exchange_balance_chart():
+    from database.queries import get_exchange_balance_timeseries
+
     st.subheader("🏦 交易所余额变化")
 
     sel_chain = st.session_state.get("selected_chain", "all")

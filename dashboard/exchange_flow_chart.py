@@ -59,8 +59,9 @@ def render_exchange_flow_chart():
 
     sel_chain = st.session_state.get("selected_chain", "all")
     chain = None if sel_chain == "all" else sel_chain
+    token_filter = st.session_state.get("selected_token", "ALL")
 
-    per_exchange = get_exchange_flow_timeseries_by_exchange(hours=24, chain=chain)
+    per_exchange = get_exchange_flow_timeseries_by_exchange(hours=24, chain=chain, token_filter=token_filter)
 
     if not per_exchange:
         st.caption("暂无交易所流量数据，请先启动采集器。")

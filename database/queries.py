@@ -31,7 +31,7 @@ def acknowledge_alert(alert_id):
         session.commit()
 
 
-def get_24h_aggregates(chain=None):
+def get_24h_aggregates(chain=None, token_filter=None):
     """Return inflow/outflow totals for last 24 hours."""
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=24)
@@ -52,6 +52,9 @@ def get_24h_aggregates(chain=None):
         addr_q = addr_q.filter(MonitoredAddress.chain == chain)
         transfer_q = transfer_q.filter(StablecoinTransfer.chain == chain)
         mint_q = mint_q.filter(MintBurnEvent.chain == chain)
+    if token_filter and token_filter != "ALL":
+        transfer_q = transfer_q.filter(StablecoinTransfer.token_symbol == token_filter)
+        mint_q = mint_q.filter(MintBurnEvent.token_symbol == token_filter)
 
     exchange_addrs = [a[0] for a in addr_q.all()]
 
@@ -102,7 +105,7 @@ def get_large_transfers(hours=24, min_value_usd=1_000_000, token_filter=None, ch
 
 
 
-def get_exchange_flow_timeseries_by_exchange(hours=24, chain=None):
+def get_exchange_flow_timeseries_by_exchange(hours=24, chain=None, token_filter=None):
     """Return hourly inflow/outflow grouped by exchange name.
 
     Returns dict: exchange_name -> list[{hour, inflow, outflow, net_flow}]
@@ -121,6 +124,8 @@ def get_exchange_flow_timeseries_by_exchange(hours=24, chain=None):
     if chain:
         addr_q = addr_q.filter(MonitoredAddress.chain == chain)
         transfer_q = transfer_q.filter(StablecoinTransfer.chain == chain)
+    if token_filter and token_filter != "ALL":
+        transfer_q = transfer_q.filter(StablecoinTransfer.token_symbol == token_filter)
 
     addresses = addr_q.all()
 
@@ -189,6 +194,64 @@ def get_recent_mint_burns(hours=24, chain=None):
     if chain:
         q = q.filter(MintBurnEvent.chain == chain)
     return q.order_by(MintBurnEvent.detected_at.desc()).all()
+
+
+def get_hourly_flow_patterns(days=7, chain=None, token_filter=None):
+    """Return average hourly inflow/outflow over the last N days.
+
+    Returns list of 24 dicts [{hour, avg_inflow, avg_outflow, tx_count}]
+    """
+    session = get_session()
+    since = datetime.utcnow() - timedelta(days=days)
+
+    addr_q = session.query(MonitoredAddress.address).filter(
+        MonitoredAddress.category == "exchange",
+        MonitoredAddress.is_active == True,
+    )
+    if chain:
+        addr_q = addr_q.filter(MonitoredAddress.chain == chain)
+    exchange_addrs = [a[0] for a in addr_q.all()]
+
+    if not exchange_addrs:
+        return [{"hour": h, "avg_inflow": 0, "avg_outflow": 0, "tx_count": 0} for h in range(24)]
+
+    exchange_set = set(exchange_addrs)
+
+    transfer_q = session.query(StablecoinTransfer).filter(
+        StablecoinTransfer.detected_at >= since,
+    )
+    if chain:
+        transfer_q = transfer_q.filter(StablecoinTransfer.chain == chain)
+    if token_filter and token_filter != "ALL":
+        transfer_q = transfer_q.filter(StablecoinTransfer.token_symbol == token_filter)
+
+    transfers = transfer_q.all()
+
+    # Count distinct days with data
+    day_set = set()
+    hourly = {h: {"inflow": 0, "outflow": 0, "count": 0} for h in range(24)}
+
+    for t in transfers:
+        hour = t.detected_at.hour
+        day_set.add(t.detected_at.date())
+        if t.to_address in exchange_set:
+            hourly[hour]["inflow"] += t.value_usd or 0
+            hourly[hour]["count"] += 1
+        if t.from_address in exchange_set:
+            hourly[hour]["outflow"] += t.value_usd or 0
+            hourly[hour]["count"] += 1
+
+    day_count = len(day_set) or 1
+
+    return [
+        {
+            "hour": h,
+            "avg_inflow": hourly[h]["inflow"] / day_count,
+            "avg_outflow": hourly[h]["outflow"] / day_count,
+            "tx_count": hourly[h]["count"],
+        }
+        for h in range(24)
+    ]
 
 
 def get_active_monitored_addresses(category=None, chain=None):

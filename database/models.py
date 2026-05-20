@@ -25,6 +25,7 @@ class MonitoredAddress(Base):
 class StablecoinTransfer(Base):
     __tablename__ = "stablecoin_transfers"
     __table_args__ = (
+        UniqueConstraint("tx_hash", "token_symbol", name="uq_tx_token"),
         Index("idx_st_timestamp", "block_timestamp"),
         Index("idx_st_value_usd", "value_usd"),
         Index("idx_st_to_label", "to_label"),
@@ -32,7 +33,7 @@ class StablecoinTransfer(Base):
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    tx_hash = Column(String(66), nullable=False, unique=True)
+    tx_hash = Column(String(66), nullable=False)
     chain = Column(String(20), nullable=False, default="ethereum")
     token_symbol = Column(String(10), nullable=False)
     token_address = Column(String(42), nullable=False)

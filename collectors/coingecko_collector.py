@@ -21,7 +21,7 @@ class CoinGeckoCollector(BaseCollector):
         try:
             self.rate_limiter.acquire()
             resp = self.client.get(COINGECKO_PRICE_URL, params={
-                "ids": "ethereum,tether,usd-coin",
+                "ids": "ethereum,tether,usd-coin,wrapped-bitcoin",
                 "vs_currencies": "usd",
             })
             data = resp.json()
@@ -45,3 +45,7 @@ def get_usdt_price() -> float | None:
 
 def get_usdc_price() -> float | None:
     return price_cache.get("price_usd-coin")
+
+
+def get_wbtc_price() -> float | None:
+    return price_cache.get("price_wrapped-bitcoin")

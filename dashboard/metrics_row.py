@@ -10,6 +10,7 @@ def render_metrics():
 
     sel_chain = st.session_state.get("selected_chain", "all")
     chain = None if sel_chain == "all" else sel_chain
+    token_filter = st.session_state.get("selected_token", "ALL")
 
     # ── Debug: show actual database state ──
     with st.expander("🔧 数据库诊断 (点击展开)", expanded=True):
@@ -63,7 +64,7 @@ def render_metrics():
         if total_tx == 0 and total_alerts > 0:
             st.warning("⚠️ 异常: 警报存在但转账记录为空！请检查采集器日志。")
 
-    agg = get_24h_aggregates(chain=chain)
+    agg = get_24h_aggregates(chain=chain, token_filter=token_filter)
 
     col1, col2, col3, col4, col5 = st.columns(5)
 

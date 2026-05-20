@@ -32,6 +32,7 @@ from dashboard.exchange_flow_chart import render_exchange_flow_chart
 from dashboard.transfer_table import render_transfer_table
 from dashboard.mint_burn_timeline import render_mint_burn_timeline
 from dashboard.whale_movements import render_whale_movements
+from dashboard.hourly_heatmap import render_hourly_heatmap
 
 logging.basicConfig(level=logging.INFO)
 
@@ -179,7 +180,7 @@ def setup_scheduler(run_sync_first=True):
 
 def main():
     st.title("🔍 链上数据监控面板")
-    st.caption("追踪稳定币流向、巨鲸动向和市场异动事件")
+    st.caption("追踪链上资金流向、巨鲸动向和市场异动事件")
 
     # Sidebar
     render_sidebar()
@@ -266,7 +267,12 @@ def main():
 
     st.divider()
 
-    # Row 3: Exchange flow chart + Transfer table
+    # Row 3: Time pattern analysis
+    render_hourly_heatmap()
+
+    st.divider()
+
+    # Row 4: Exchange flow chart + Transfer table
     col_chart, col_table = st.columns([6, 5])
     with col_chart:
         render_exchange_flow_chart()

@@ -11,6 +11,7 @@ def render_transfer_table():
 
     sel_chain = st.session_state.get("selected_chain", "all")
     chain = None if sel_chain == "all" else sel_chain
+    global_token = st.session_state.get("selected_token", "ALL")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -19,7 +20,11 @@ def render_transfer_table():
             index=3, format_func=lambda x: f"最近 {x} 小时",
         )
     with col2:
-        token_filter = st.selectbox("币种", options=["ALL", "USDT", "USDC"], format_func=lambda x: "全部" if x == "ALL" else x)
+        token_filter = st.selectbox(
+            "币种", options=["ALL", "USDT", "USDC", "ETH", "WBTC"],
+            index=["ALL", "USDT", "USDC", "ETH", "WBTC"].index(global_token) if global_token in ["ALL", "USDT", "USDC", "ETH", "WBTC"] else 0,
+            format_func=lambda x: "全部" if x == "ALL" else x,
+        )
     with col3:
         min_val = st.number_input(
             "最低金额 (USD)", min_value=10_000, max_value=100_000_000,

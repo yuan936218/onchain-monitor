@@ -45,21 +45,31 @@ DEFAULT_POLL_INTERVAL_SECONDS = int(_get_config("POLL_INTERVAL", "120"))
 # Data retention (days)
 DATA_RETENTION_DAYS = int(_get_config("DATA_RETENTION_DAYS", "90"))
 
-# Stablecoin contract addresses
-STABLECOIN_TOKENS = {
+# Monitored tokens (ERC-20 + native ETH)
+# type: "erc20" = ERC-20 token tracked via tokentx, "native" = native coin via txlist
+MONITORED_TOKENS = {
     "ethereum": {
-        "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-        "USDC": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "USDT": {"address": "0xdAC17F958D2ee523a2206206994597C13D831ec7", "type": "erc20", "coingecko_id": "tether"},
+        "USDC": {"address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "type": "erc20", "coingecko_id": "usd-coin"},
+        "ETH":  {"type": "native", "coingecko_id": "ethereum"},
+        "WBTC": {"address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599", "type": "erc20", "coingecko_id": "wrapped-bitcoin"},
     },
     "arbitrum": {
-        "USDT": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
-        "USDC": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "USDT": {"address": "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", "type": "erc20", "coingecko_id": "tether"},
+        "USDC": {"address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", "type": "erc20", "coingecko_id": "usd-coin"},
+        "ETH":  {"type": "native", "coingecko_id": "ethereum"},
+        "WBTC": {"address": "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", "type": "erc20", "coingecko_id": "wrapped-bitcoin"},
     },
     "bsc": {
-        "USDT": "0x55d398326f99059fF775485246999027B3197955",
-        "USDC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+        "USDT": {"address": "0x55d398326f99059fF775485246999027B3197955", "type": "erc20", "coingecko_id": "tether"},
+        "USDC": {"address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", "type": "erc20", "coingecko_id": "usd-coin"},
+        "ETH":  {"address": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", "type": "erc20", "coingecko_id": "ethereum"},
+        "WBTC": {"address": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", "type": "erc20", "coingecko_id": "wrapped-bitcoin"},
     },
 }
+
+# Deprecated alias for backward compatibility
+STABLECOIN_TOKENS = MONITORED_TOKENS
 
 STABLECOIN_ISSUERS = {
     "ethereum": {
@@ -82,7 +92,11 @@ CHAIN_CONFIG = {
     "bsc": {"chain_id": "56", "explorer": "https://bscscan.com", "label": "BSC"},
 }
 
+TOKEN_LIST = ["USDT", "USDC", "ETH", "WBTC"]
+
 
 def get_tokens_for_chain(chain: str) -> dict:
-    """Get stablecoin token addresses for a specific chain."""
-    return STABLECOIN_TOKENS.get(chain, {})
+    """Get ERC-20 token addresses for a specific chain (backward compat)."""
+    tokens = MONITORED_TOKENS.get(chain, {})
+    return {sym: info["address"] for sym, info in tokens.items()
+            if info.get("type") == "erc20" and info.get("address")}

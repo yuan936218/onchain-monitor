@@ -74,6 +74,43 @@ def _migrate_alerts_add_chain():
         conn.commit()
 
 
+def _migrate_stablecoin_transfers():
+    """Rebuild stablecoin_transfers if it still has unique-only-on-tx_hash constraint."""
+    inspector = inspect(engine)
+    if "stablecoin_transfers" not in inspector.get_table_names():
+        return
+
+    unique_constraints = inspector.get_unique_constraints("stablecoin_transfers")
+    has_new = any("uq_tx_token" in (uc.get("name") or "") for uc in unique_constraints)
+
+    if has_new:
+        return
+
+    logger.info("[migration] Rebuilding stablecoin_transfers for compound unique constraint")
+
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT * FROM stablecoin_transfers"))
+        rows = [dict(row._mapping) for row in result]
+        conn.execute(text("DROP TABLE stablecoin_transfers"))
+        conn.commit()
+
+    Base.metadata.create_all(engine, tables=[Base.metadata.tables["stablecoin_transfers"]])
+
+    if rows:
+        with engine.connect() as conn:
+            for row in rows:
+                row.pop("id", None)
+                columns = ", ".join(row.keys())
+                placeholders = ", ".join(f":{k}" for k in row)
+                conn.execute(
+                    text(f"INSERT INTO stablecoin_transfers ({columns}) VALUES ({placeholders})"),
+                    row,
+                )
+            conn.commit()
+
+    logger.info(f"[migration] Rebuilt stablecoin_transfers, restored {len(rows)} rows")
+
+
 def init_database():
     import time
     for attempt in range(5):
@@ -81,6 +118,7 @@ def init_database():
             Base.metadata.create_all(engine)
             _migrate_monitored_addresses()
             _migrate_alerts_add_chain()
+            _migrate_stablecoin_transfers()
             return
         except Exception as e:
             if attempt < 4:

@@ -21,6 +21,15 @@ def render_sidebar():
             key="selected_chain",
         )
 
+        # ── Token filter ──
+        st.subheader("🪙 监控币种")
+        token_filter = st.selectbox(
+            "币种筛选",
+            options=["ALL", "USDT", "USDC", "ETH", "WBTC"],
+            format_func=lambda x: "全部币种" if x == "ALL" else x,
+            key="selected_token",
+        )
+
         st.divider()
 
         # ── Status indicator ──

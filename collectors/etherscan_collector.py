@@ -1,4 +1,4 @@
-"""Etherscan API collector for stablecoin transfers — multi-chain support."""
+"""Etherscan API collector for on-chain transfers — multi-chain, multi-token support."""
 
 import os
 import logging
@@ -7,8 +7,9 @@ from collectors.base import BaseCollector
 from database.connection import get_session
 from database.models import StablecoinTransfer, MonitoredAddress, WhaleMovement, MintBurnEvent
 from database.queries import get_poll_state, update_poll_state
-from config.settings import ETHERSCAN_API_KEY, ETHERSCAN_BASE_URL, CHAIN_CONFIG, STABLECOIN_TOKENS
+from config.settings import ETHERSCAN_API_KEY, ETHERSCAN_BASE_URL, CHAIN_CONFIG, MONITORED_TOKENS
 from utils.address_labeler import resolve_label
+from collectors.coingecko_collector import get_eth_price, get_wbtc_price
 
 logger = logging.getLogger(__name__)
 
@@ -99,10 +100,33 @@ class EtherscanCollector(BaseCollector):
             logger.warning(f"[etherscan] API error for {address}: {data.get('message', data)}")
             return []
 
+    def _fetch_native_transfers(self, address: str, from_block: int, to_block: int, chain_id: str):
+        """Fetch native coin transfers (ETH) for an address via txlist."""
+        data = self._api_call(self._api_params(chain_id, {
+            "module": "account",
+            "action": "txlist",
+            "address": address,
+            "startblock": from_block,
+            "endblock": to_block,
+            "sort": "desc",
+        }))
+        if data.get("status") == "1" and isinstance(data.get("result"), list):
+            return [tx for tx in data["result"] if float(tx.get("value", 0)) > 0]
+        elif "No transactions" in str(data.get("message", "")):
+            return []
+        elif data.get("status") == "0":
+            result = data.get("result")
+            if isinstance(result, list):
+                return [tx for tx in result if float(tx.get("value", 0)) > 0]
+            return []
+        else:
+            logger.warning(f"[etherscan] API error for {address} native: {data.get('message', data)}")
+            return []
+
     def _collect_chain(self, chain: str, session):
         """Collect transfers for a single chain. Returns stats dict."""
         chain_id = CHAIN_CONFIG[chain]["chain_id"]
-        tokens = STABLECOIN_TOKENS.get(chain, {})
+        tokens = MONITORED_TOKENS.get(chain, {})
         if not tokens:
             logger.info(f"[etherscan] No tokens configured for {chain}, skipping")
             return {"chain": chain, "addresses": 0, "new_transfers": 0, "new_whale_moves": 0, "api_responses": 0, "api_errors": 0, "block_range": "N/A"}
@@ -139,35 +163,68 @@ class EtherscanCollector(BaseCollector):
         else:
             from_block = latest_block - 10_000
 
-        logger.info(f"[etherscan] {chain} scanning blocks {from_block}-{latest_block} for {len(addresses)} addresses x {len(tokens)} tokens")
+        token_count = len(tokens)
+        logger.info(f"[etherscan] {chain} scanning blocks {from_block}-{latest_block} for {len(addresses)} addresses x {token_count} tokens")
 
         new_transfers = 0
         new_whale_moves = 0
         api_errors = 0
         api_responses = 0
 
+        # Pre-load prices for ETH and WBTC
+        eth_price = get_eth_price()
+        wbtc_price = get_wbtc_price()
+
         for addr in addresses:
-            for symbol, token_addr in tokens.items():
+            for symbol, token_info in tokens.items():
                 try:
-                    transfers = self._fetch_token_transfers(
-                        address=addr.address,
-                        token_address=token_addr,
-                        from_block=from_block,
-                        to_block=latest_block,
-                        chain_id=chain_id,
-                    )
+                    token_type = token_info.get("type", "erc20")
+                    token_addr = token_info.get("address", "0x0000000000000000000000000000000000000000")
+
+                    if token_type == "native":
+                        transfers = self._fetch_native_transfers(
+                            address=addr.address,
+                            from_block=from_block,
+                            to_block=latest_block,
+                            chain_id=chain_id,
+                        )
+                    elif token_type == "erc20":
+                        transfers = self._fetch_token_transfers(
+                            address=addr.address,
+                            token_address=token_addr,
+                            from_block=from_block,
+                            to_block=latest_block,
+                            chain_id=chain_id,
+                        )
+                    else:
+                        continue
+
                     api_responses += 1
                     for tx in transfers:
                         tx_hash = tx["hash"]
                         exists = session.query(StablecoinTransfer).filter(
-                            StablecoinTransfer.tx_hash == tx_hash
+                            StablecoinTransfer.tx_hash == tx_hash,
+                            StablecoinTransfer.token_symbol == symbol,
                         ).first()
                         if exists:
                             continue
 
-                        value = float(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
                         from_addr = tx["from"].lower()
                         to_addr = tx["to"].lower()
+
+                        # Compute value and USD equivalent
+                        if token_type == "native":
+                            value = float(tx["value"]) / 1e18  # wei → ETH
+                            value_usd = value * (eth_price or 0)
+                        elif symbol == "ETH":
+                            value = float(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
+                            value_usd = value * (eth_price or 0)
+                        elif symbol == "WBTC":
+                            value = float(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
+                            value_usd = value * (wbtc_price or 0)
+                        else:
+                            value = float(tx["value"]) / (10 ** int(tx["tokenDecimal"]))
+                            value_usd = value  # stablecoin ≈ $1
 
                         transfer = StablecoinTransfer(
                             tx_hash=tx_hash,
@@ -179,7 +236,7 @@ class EtherscanCollector(BaseCollector):
                             from_label=resolve_label(from_addr, chain=chain),
                             to_label=resolve_label(to_addr, chain=chain),
                             value=value,
-                            value_usd=value,
+                            value_usd=value_usd,
                             block_number=int(tx["blockNumber"]),
                             block_timestamp=datetime.utcfromtimestamp(int(tx["timeStamp"])),
                             gas_used=int(tx.get("gasUsed", 0)),
@@ -203,33 +260,34 @@ class EtherscanCollector(BaseCollector):
                                     to_label=resolve_label(to_addr, chain=chain),
                                     asset=symbol,
                                     value=value,
-                                    value_usd=value,
+                                    value_usd=value_usd,
                                     block_number=int(tx["blockNumber"]),
                                     block_timestamp=datetime.utcfromtimestamp(int(tx["timeStamp"])),
                                 )
                                 session.add(whale)
                                 new_whale_moves += 1
 
-                        # Mint/burn detection
-                        zero_addr = "0x0000000000000000000000000000000000000000"
-                        if from_addr == zero_addr or to_addr == zero_addr:
-                            mint_exists = session.query(MintBurnEvent).filter(
-                                MintBurnEvent.tx_hash == tx_hash
-                            ).first()
-                            if not mint_exists:
-                                event_type = "mint" if from_addr == zero_addr else "burn"
-                                mint_event = MintBurnEvent(
-                                    tx_hash=tx_hash,
-                                    chain=chain,
-                                    token_symbol=symbol,
-                                    token_address=token_addr.lower(),
-                                    event_type=event_type,
-                                    value=value,
-                                    value_usd=value,
-                                    block_number=int(tx["blockNumber"]),
-                                    block_timestamp=datetime.utcfromtimestamp(int(tx["timeStamp"])),
-                                )
-                                session.add(mint_event)
+                        # Mint/burn detection (ERC-20 tokens only, skip native)
+                        if token_type != "native":
+                            zero_addr = "0x0000000000000000000000000000000000000000"
+                            if from_addr == zero_addr or to_addr == zero_addr:
+                                mint_exists = session.query(MintBurnEvent).filter(
+                                    MintBurnEvent.tx_hash == tx_hash
+                                ).first()
+                                if not mint_exists:
+                                    event_type = "mint" if from_addr == zero_addr else "burn"
+                                    mint_event = MintBurnEvent(
+                                        tx_hash=tx_hash,
+                                        chain=chain,
+                                        token_symbol=symbol,
+                                        token_address=token_addr.lower(),
+                                        event_type=event_type,
+                                        value=value,
+                                        value_usd=value_usd,
+                                        block_number=int(tx["blockNumber"]),
+                                        block_timestamp=datetime.utcfromtimestamp(int(tx["timeStamp"])),
+                                    )
+                                    session.add(mint_event)
                 except Exception as e:
                     api_errors += 1
                     logger.warning(f"[etherscan] Error fetching {symbol} for {addr.label} on {chain}: {e}")

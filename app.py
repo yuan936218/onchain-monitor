@@ -178,6 +178,8 @@ def setup_scheduler():
 
 
 def main():
+    from database.connection import ScopedSession
+
     st.title("🔍 链上数据监控面板")
     st.caption("追踪链上资金流向、巨鲸动向和市场异动事件")
 
@@ -344,13 +346,17 @@ def main():
             st.caption(f"⏳ 等待首次数据... ({elapsed:.0f}秒)")
         if st.button("🔄 刷新面板"):
             st.session_state["last_refresh"] = time.time()
+            ScopedSession.remove()
             st.rerun()
 
     # Auto-refresh to keep WebSocket alive and prevent Streamlit Cloud sleep
     if next_refresh <= 0:
         st.session_state["last_refresh"] = time.time()
         time.sleep(0.3)
+        ScopedSession.remove()
         st.rerun()
+
+    ScopedSession.remove()
 
 
 if __name__ == "__main__":

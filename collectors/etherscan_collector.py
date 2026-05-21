@@ -1,7 +1,6 @@
 """Etherscan API collector for on-chain transfers — multi-chain, multi-token support."""
 
 import os
-import time
 import logging
 from datetime import datetime, timedelta
 from collectors.base import BaseCollector
@@ -37,27 +36,19 @@ class EtherscanCollector(BaseCollector):
             params.update(extra)
         return params
 
-    def _api_call(self, params: dict, retries: int = 2):
-        """Make an Etherscan API call with rate-limit backoff."""
-        for attempt in range(retries + 1):
-            self.rate_limiter.acquire()
-            resp = self.client.get(ETHERSCAN_BASE_URL, params=params)
-            data = resp.json()
-            if data.get("status") == "1":
+    def _api_call(self, params: dict):
+        """Make an Etherscan API call."""
+        self.rate_limiter.acquire()
+        resp = self.client.get(ETHERSCAN_BASE_URL, params=params)
+        data = resp.json()
+        if data.get("status") == "1":
+            return data
+        elif data.get("status") == "0":
+            msg = str(data.get("message", ""))
+            if "No transactions" in msg or "No records" in msg:
                 return data
-            elif data.get("status") == "0":
-                msg = str(data.get("message", ""))
-                if "No transactions" in msg or "No records" in msg:
-                    return data
-                if "deprecated" in msg.lower():
-                    logger.warning(f"[etherscan] V1 deprecated, using V2 params: {msg}")
-                    return data
-                if "rate limit" in msg.lower() or "Max calls" in msg:
-                    if attempt < retries:
-                        backoff = (attempt + 1) * 3
-                        logger.warning(f"[etherscan] Rate limit hit, backing off {backoff}s (attempt {attempt+1}/{retries})")
-                        time.sleep(backoff)
-                        continue
+            if "deprecated" in msg.lower():
+                logger.warning(f"[etherscan] V1 deprecated, using V2 params: {msg}")
                 return data
             return data
         return data

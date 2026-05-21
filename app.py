@@ -39,11 +39,15 @@ from dashboard.market_intel import render_market_intel
 
 logging.basicConfig(level=logging.INFO)
 
-# Initialize database
-init_database()
+# Initialize database (cached across reruns)
+@st.cache_resource
+def _init_db():
+    init_database()
+    seed_addresses_inner()
+    return True
 
 
-def seed_addresses():
+def seed_addresses_inner():
     """Seed monitored_addresses table from config/addresses.json."""
     session = get_session()
 
@@ -71,13 +75,10 @@ def seed_addresses():
                 seeded += 1
 
     session.commit()
-    if seeded > 0:
-        return seeded
-    return 0
+    return seeded
 
 
-# Seed on first run
-seed_addresses()
+_init_db()
 
 
 def setup_scheduler():
@@ -212,12 +213,22 @@ def main():
     status_color = "🟢" if (api_ok and running and has_data) else "🟡" if (api_ok and running) else "🔴"
     status_text = "采集中" if (api_ok and running and has_data) else "启动中..." if (api_ok and running) else "需要API Key"
 
-    alert_count = get_unacknowledged_alert_count()
+    # Cached counts (refreshed every 30s to avoid DB pressure on rerun)
+    @st.cache_data(ttl=30)
+    def _cached_alert_count():
+        return get_unacknowledged_alert_count()
+
+    @st.cache_data(ttl=30)
+    def _cached_addr_count():
+        return get_session().query(MonitoredAddress).filter(MonitoredAddress.is_active == True).count()
+
+    alert_count = _cached_alert_count()
+    addr_count = _cached_addr_count()
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("运行状态", f"{status_color} {status_text}")
     col2.metric("未读警报", alert_count)
-    col3.metric("监控地址数", get_session().query(MonitoredAddress).filter(MonitoredAddress.is_active == True).count())
+    col3.metric("监控地址数", addr_count)
     col4.metric("API配置", f"Etherscan: {'✓ 已配置' if api_ok else '✗ 未配置'}")
 
     # Show collection status (if collector is running)

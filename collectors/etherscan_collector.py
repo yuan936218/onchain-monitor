@@ -25,7 +25,7 @@ def _get_api_key():
 
 class EtherscanCollector(BaseCollector):
     def __init__(self):
-        super().__init__(name="etherscan", calls_per_second=3, calls_per_day=100_000)
+        super().__init__(name="etherscan", calls_per_second=2, calls_per_day=100_000)
         self.last_stats = {}
         self.last_error = None
 

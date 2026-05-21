@@ -159,11 +159,17 @@ def render_sidebar():
         st.divider()
 
         # ── API Key setup hint ──
-        api_key_set = bool(st.session_state.get("etherscan_key", ""))
-        if not api_key_set:
+        import os
+        from config.settings import ETHERSCAN_API_KEY as _configured_key
+        api_key_from_secrets = bool(_configured_key)
+        api_key_from_sidebar = bool(st.session_state.get("etherscan_key", ""))
+        api_key_from_env = bool(os.getenv("ETHERSCAN_API_KEY", ""))
+        api_key_available = api_key_from_secrets or api_key_from_sidebar or api_key_from_env
+
+        if not api_key_from_secrets and api_key_from_sidebar:
             st.info(
-                "💡 **API Key 未持久化**\n\n"
-                "面板休眠后 Key 会丢失。建议在 Streamlit Cloud 管理页 → **Settings → Secrets** 中设置：\n"
+                "💡 **API Key 仅在本次会话有效**\n\n"
+                "面板休眠后会丢失。建议在 Streamlit Cloud → **Settings → Secrets** 设置：\n"
                 '```\nETHERSCAN_API_KEY = "你的key"\n```'
             )
 

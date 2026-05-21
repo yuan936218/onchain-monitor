@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.db
+data/
+.git/
+.gitignore
+.env
+*.md
+CLAUDE.md
+.mypy_cache/
+.pytest_cache/

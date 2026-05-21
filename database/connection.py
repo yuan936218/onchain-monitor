@@ -1,8 +1,17 @@
-"""Database connection setup."""
+"""Database connection setup — SQLite with NullPool (no connection pooling).
+
+SQLite connections are lightweight file handles. Pooling adds complexity
+without benefit and causes TimeoutError when Streamlit's thread pool and
+APScheduler's background threads compete for connections.
+
+NullPool means each session gets a fresh connection, and closing the
+session returns it to the OS immediately — no pool to exhaust.
+"""
 
 import os
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.pool import NullPool
 
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 os.makedirs(DB_DIR, exist_ok=True)
@@ -13,13 +22,11 @@ engine = create_engine(
     DATABASE_URL,
     echo=False,
     connect_args={"check_same_thread": False, "timeout": 30},
-    pool_size=10,
-    max_overflow=10,
-    pool_timeout=30,
-    pool_pre_ping=True,
+    poolclass=NullPool,  # No pooling — SQLite connections are just files
 )
 
-# Enable WAL mode for concurrent reads (dashboard) + writes (collector)
+
+# Enable WAL mode for concurrent reads + writes
 @event.listens_for(engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
@@ -34,4 +41,5 @@ ScopedSession = scoped_session(SessionFactory)
 
 
 def get_session():
+    """Get a thread-local session. Call ScopedSession.remove() when done."""
     return ScopedSession()

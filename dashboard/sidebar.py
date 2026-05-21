@@ -13,7 +13,7 @@ def render_sidebar():
         st.header("⚙️ 设置")
 
         # ── Chain selector ──
-        chain_options = {"all": "全部链", "ethereum": "Ethereum", "arbitrum": "Arbitrum", "bsc": "BSC"}
+        chain_options = {"all": "全部链", "ethereum": "Ethereum", "arbitrum": "Arbitrum"}
         selected_chain = st.selectbox(
             "⛓️ 监控链",
             options=list(chain_options.keys()),

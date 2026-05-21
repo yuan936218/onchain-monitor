@@ -13,7 +13,7 @@ from collectors.coingecko_collector import get_eth_price, get_wbtc_price
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_CHAINS = ["ethereum", "arbitrum", "bsc"]
+SUPPORTED_CHAINS = ["ethereum", "arbitrum"]  # BSC requires paid API plan
 
 
 def _get_api_key():
@@ -25,7 +25,7 @@ def _get_api_key():
 
 class EtherscanCollector(BaseCollector):
     def __init__(self):
-        super().__init__(name="etherscan", calls_per_second=5, calls_per_day=100_000)
+        super().__init__(name="etherscan", calls_per_second=3, calls_per_day=100_000)
         self.last_stats = {}
         self.last_error = None
 

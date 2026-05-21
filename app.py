@@ -88,7 +88,6 @@ def setup_scheduler(run_sync_first=True):
     tier kills idle processes). The background scheduler then keeps data
     fresh while the user has the page open.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     from apscheduler.schedulers.background import BackgroundScheduler
     from collectors.etherscan_collector import EtherscanCollector
     from collectors.whale_alert_collector import WhaleAlertCollector
@@ -111,41 +110,28 @@ def setup_scheduler(run_sync_first=True):
         if api_ok:
             # Check how stale each chain is
             from config.settings import CHAIN_CONFIG
-            for chain_key in ["ethereum", "arbitrum", "bsc"]:
+            for chain_key in ["ethereum", "arbitrum"]:
                 poll = get_poll_state(f"etherscan_{chain_key}")
                 chain_status[chain_key] = {
                     "last_block": poll.last_block if poll else None,
                     "last_time": poll.last_timestamp if poll else None,
                 }
 
-            # Collect all chains in parallel for faster catch-up
-            chains_to_collect = ["ethereum", "arbitrum", "bsc"]
+            # Collect chains sequentially (rate limiter is 3/sec shared across chains)
             all_stats = []
             errors = []
-
-            def _collect_one_chain(chain_key):
-                """Collect a single chain with its own DB session."""
-                sess = get_session()
-                try:
-                    stats = collector._collect_chain(chain_key, sess)
-                    return stats
-                finally:
-                    sess.close()
-
-            with ThreadPoolExecutor(max_workers=3) as executor:
-                futures = {
-                    executor.submit(_collect_one_chain, chain): chain
-                    for chain in chains_to_collect
-                }
-                for future in as_completed(futures):
-                    chain = futures[future]
+            sess = get_session()
+            try:
+                for chain in ["ethereum", "arbitrum"]:
                     try:
-                        stats = future.result()
+                        stats = collector._collect_chain(chain, sess)
                         all_stats.append(stats)
                         if stats.get("error"):
                             errors.append(f"{chain}: {stats['error']}")
                     except Exception as e:
                         errors.append(f"{chain}: {str(e)[:200]}")
+            finally:
+                sess.close()
 
             # Run alerts
             try:
@@ -311,8 +297,8 @@ def main():
 
         # Per-chain status row
         from database.queries import get_poll_state as _get_poll
-        cols = st.columns(3)
-        chain_labels = {"ethereum": "Ethereum", "arbitrum": "Arbitrum", "bsc": "BSC"}
+        cols = st.columns(2)
+        chain_labels = {"ethereum": "Ethereum", "arbitrum": "Arbitrum"}
         for i, (chain_key, label) in enumerate(chain_labels.items()):
             poll = _get_poll(f"etherscan_{chain_key}")
             with cols[i]:

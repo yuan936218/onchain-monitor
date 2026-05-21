@@ -330,24 +330,23 @@ def main():
     with col_whale:
         render_whale_movements()
 
-    # Auto-refresh: fast (5s) while waiting for first data, then normal interval
+    # Auto-refresh: fast (5s) while waiting, then 30s to maintain WebSocket
     has_data = st.session_state.get("last_collect_time") is not None
-    poll_interval = st.session_state.get("poll_interval", 120)
-    effective_interval = poll_interval if has_data else 5  # fast refresh until first data
+    effective_interval = 30 if has_data else 5  # 30s keeps connection alive, prevents sleep
     elapsed = time.time() - st.session_state.get("last_refresh", time.time())
     next_refresh = max(0, effective_interval - elapsed)
 
     with st.sidebar:
         st.divider()
         if has_data:
-            st.caption(f"下次自动刷新: {next_refresh:.0f}秒")
+            st.caption(f"⏱️ 下次刷新: {next_refresh:.0f}秒 · 每30秒自动保活")
         else:
             st.caption(f"⏳ 等待首次数据... ({elapsed:.0f}秒)")
         if st.button("🔄 刷新面板"):
             st.session_state["last_refresh"] = time.time()
             st.rerun()
 
-    # Auto-refresh
+    # Auto-refresh to keep WebSocket alive and prevent Streamlit Cloud sleep
     if next_refresh <= 0:
         st.session_state["last_refresh"] = time.time()
         time.sleep(0.3)

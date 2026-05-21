@@ -296,6 +296,9 @@ class EtherscanCollector(BaseCollector):
         # Snapshot exchange balances (time-gated every 15 min)
         self._snapshot_balances(chain, session)
 
+        # Persist transfers (balance snapshot may have already committed)
+        session.commit()
+
         update_poll_state(f"etherscan_{chain}", latest_block, datetime.utcnow())
 
         return {

@@ -158,8 +158,17 @@ def render_sidebar():
 
         st.divider()
 
+        # ── API Key setup hint ──
+        api_key_set = bool(st.session_state.get("etherscan_key", ""))
+        if not api_key_set:
+            st.info(
+                "💡 **API Key 未持久化**\n\n"
+                "面板休眠后 Key 会丢失。建议在 Streamlit Cloud 管理页 → **Settings → Secrets** 中设置：\n"
+                '```\nETHERSCAN_API_KEY = "你的key"\n```'
+            )
+
         if st.button("🔄 立即刷新面板"):
             st.session_state["force_refresh"] = True
             st.rerun()
 
-        st.caption("链上监控 v1.0 · 自动采集")
+        st.caption("链上监控 v2.0 · 启动自动追补 · 使用中持续采集")

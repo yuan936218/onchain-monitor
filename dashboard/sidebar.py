@@ -177,4 +177,4 @@ def render_sidebar():
             st.session_state["force_refresh"] = True
             st.rerun()
 
-        st.caption("链上监控 v2.0 · 启动自动追补 · 使用中持续采集")
+        st.caption("链上监控 v2.1 · 异步启动 · 后台采集 · 自动刷新")

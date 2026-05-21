@@ -21,7 +21,7 @@ DATABASE_URL = f"sqlite:///{DB_PATH}"
 engine = create_engine(
     DATABASE_URL,
     echo=False,
-    connect_args={"check_same_thread": False, "timeout": 30},
+    connect_args={"check_same_thread": False},
     poolclass=NullPool,  # No pooling — SQLite connections are just files
 )
 
@@ -33,6 +33,8 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA busy_timeout=30000")
     cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA cache_size=-8000")  # 8 MB page cache
     cursor.close()
 
 

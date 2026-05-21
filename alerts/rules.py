@@ -19,7 +19,7 @@ def _get_threshold(key: str, default: float) -> float:
         value = st.session_state.get(key)
         if value is not None:
             return float(value)
-    except Exception:
+    except (RuntimeError, AttributeError, ValueError, TypeError):
         pass
     return float(default)
 

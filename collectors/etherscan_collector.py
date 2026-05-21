@@ -28,6 +28,7 @@ class EtherscanCollector(BaseCollector):
         super().__init__(name="etherscan", calls_per_second=2, calls_per_day=100_000)
         self.last_stats = {}
         self.last_error = None
+        self._last_balance_snapshot: dict[str, datetime] = {}
 
     def _api_params(self, chain_id: str, extra: dict = None) -> dict:
         """Build API params with V2 chainid support."""
@@ -289,6 +290,7 @@ class EtherscanCollector(BaseCollector):
                                     )
                                     session.add(mint_event)
                 except Exception as e:
+                    session.rollback()
                     api_errors += 1
                     logger.warning(f"[etherscan] Error fetching {symbol} for {addr.label} on {chain}: {e}")
                     continue
@@ -313,9 +315,6 @@ class EtherscanCollector(BaseCollector):
             "api_responses": api_responses,
             "api_errors": api_errors,
         }
-
-    # Time gate: snapshot balances at most every 15 minutes per chain
-    _last_balance_snapshot = {}
 
     def _snapshot_balances(self, chain: str, session):
         """Snapshot exchange wallet balances for a single chain."""
@@ -397,6 +396,7 @@ class EtherscanCollector(BaseCollector):
                     session.add(snapshot)
                     snapshots_saved += 1
                 except Exception as e:
+                    session.rollback()
                     logger.debug(f"[etherscan] Balance snapshot error {symbol} {addr.label} {chain}: {e}")
                     continue
 

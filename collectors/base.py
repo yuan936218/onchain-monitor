@@ -25,6 +25,18 @@ class BaseCollector(ABC):
         self.max_retries = 3
         self.client = make_client()
 
+    def close(self):
+        """Release the HTTP client's connection pool."""
+        if self.client is not None:
+            self.client.close()
+            self.client = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
     @abstractmethod
     def collect(self):
         """Execute one collection cycle. Must be implemented by subclasses."""

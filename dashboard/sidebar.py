@@ -64,14 +64,14 @@ def render_sidebar():
                     import httpx
                     from collectors.base import make_client
                     try:
-                        client = make_client(timeout=15)
-                        resp = client.get("https://api.etherscan.io/v2/api", params={
-                            "chainid": "1", "module": "account", "action": "txlist",
-                            "address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",
-                            "startblock": 0, "endblock": 99999999,
-                            "page": 1, "offset": 1, "sort": "desc",
-                            "apikey": etherscan_key,
-                        })
+                        with make_client(timeout=15) as client:
+                            resp = client.get("https://api.etherscan.io/v2/api", params={
+                                "chainid": "1", "module": "account", "action": "txlist",
+                                "address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",
+                                "startblock": 0, "endblock": 99999999,
+                                "page": 1, "offset": 1, "sort": "desc",
+                                "apikey": etherscan_key,
+                            })
                         data = resp.json()
                         if data.get("status") == "1" and isinstance(data.get("result"), list):
                             block = int(data["result"][0]["blockNumber"]) if data["result"] else 0
@@ -90,15 +90,15 @@ def render_sidebar():
                     import httpx
                     from collectors.base import make_client
                     try:
-                        client = make_client(timeout=15)
-                        resp = client.get("https://api.etherscan.io/v2/api", params={
-                            "chainid": "1", "module": "account", "action": "tokentx",
-                            "contractaddress": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-                            "address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",
-                            "startblock": 0, "endblock": 99999999,
-                            "page": 1, "offset": 3, "sort": "desc",
-                            "apikey": etherscan_key,
-                        })
+                        with make_client(timeout=15) as client:
+                            resp = client.get("https://api.etherscan.io/v2/api", params={
+                                "chainid": "1", "module": "account", "action": "tokentx",
+                                "contractaddress": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+                                "address": "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",
+                                "startblock": 0, "endblock": 99999999,
+                                "page": 1, "offset": 3, "sort": "desc",
+                                "apikey": etherscan_key,
+                            })
                         data = resp.json()
                         if data.get("status") == "1" and isinstance(data.get("result"), list):
                             st.success(f"✅ {len(data['result'])} 笔")
@@ -134,21 +134,21 @@ def render_sidebar():
                 import httpx
                 from collectors.base import make_client
                 try:
-                    client = make_client(timeout=15)
-                    test_card = {
-                        "msg_type": "interactive",
-                        "card": {
-                            "header": {
-                                "title": {"tag": "plain_text", "content": "🧪 飞书通知测试"},
-                                "template": "blue",
+                    with make_client(timeout=15) as client:
+                        test_card = {
+                            "msg_type": "interactive",
+                            "card": {
+                                "header": {
+                                    "title": {"tag": "plain_text", "content": "🧪 飞书通知测试"},
+                                    "template": "blue",
+                                },
+                                "elements": [
+                                    {"tag": "markdown", "content": "这是一条来自**链上数据监控面板**的测试消息。\n\n如果你的飞书群收到这条消息，说明 Webhook 配置正确 ✅"},
+                                    {"tag": "note", "elements": [{"tag": "plain_text", "content": f"链上监控 v2.1 · 测试时间 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"}]},
+                                ],
                             },
-                            "elements": [
-                                {"tag": "markdown", "content": "这是一条来自**链上数据监控面板**的测试消息。\n\n如果你的飞书群收到这条消息，说明 Webhook 配置正确 ✅"},
-                                {"tag": "note", "elements": [{"tag": "plain_text", "content": f"链上监控 v2.1 · 测试时间 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"}]},
-                            ],
-                        },
-                    }
-                    resp = client.post(feishu_url, json=test_card)
+                        }
+                        resp = client.post(feishu_url, json=test_card)
                     if resp.status_code == 200:
                         result = resp.json()
                         if result.get("code") == 0:

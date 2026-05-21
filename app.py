@@ -4,6 +4,7 @@ import json
 import sys
 import os
 import time
+import queue
 import logging
 from datetime import datetime, timedelta
 
@@ -49,33 +50,36 @@ def _init_db():
 
 def seed_addresses_inner():
     """Seed monitored_addresses table from config/addresses.json."""
+    from database.connection import ScopedSession
     session = get_session()
+    try:
+        config_path = os.path.join(os.path.dirname(__file__), "config", "addresses.json")
+        with open(config_path, "r") as f:
+            data = json.load(f)
 
-    config_path = os.path.join(os.path.dirname(__file__), "config", "addresses.json")
-    with open(config_path, "r") as f:
-        data = json.load(f)
+        seeded = 0
+        for chain, categories in data.items():
+            for category, addresses in categories.items():
+                for addr in addresses:
+                    exists = session.query(MonitoredAddress).filter(
+                        MonitoredAddress.address == addr["address"].lower(),
+                        MonitoredAddress.chain == chain,
+                    ).first()
+                    if exists:
+                        continue
+                    session.add(MonitoredAddress(
+                        address=addr["address"].lower(),
+                        label=addr["label"],
+                        category="exchange" if category == "exchanges" else category,
+                        chain=chain,
+                        notes=addr.get("notes", ""),
+                    ))
+                    seeded += 1
 
-    seeded = 0
-    for chain, categories in data.items():
-        for category, addresses in categories.items():
-            for addr in addresses:
-                exists = session.query(MonitoredAddress).filter(
-                    MonitoredAddress.address == addr["address"].lower(),
-                    MonitoredAddress.chain == chain,
-                ).first()
-                if exists:
-                    continue
-                session.add(MonitoredAddress(
-                    address=addr["address"].lower(),
-                    label=addr["label"],
-                    category="exchange" if category == "exchanges" else category,
-                    chain=chain,
-                    notes=addr.get("notes", ""),
-                ))
-                seeded += 1
-
-    session.commit()
-    return seeded
+        session.commit()
+        return seeded
+    finally:
+        ScopedSession.remove()
 
 
 _init_db()
@@ -84,8 +88,8 @@ _init_db()
 def setup_scheduler():
     """Start background collectors WITHOUT blocking page render.
 
-    A one-shot catch-up job fires immediately (1s delay), then the regular
-    interval collector takes over. This avoids the ~60s white screen on first
+    A one-shot catch-up job fires immediately, then the regular
+    interval collector takes over. This avoids the white screen on first
     load — the dashboard renders instantly with "waiting for first collection"
     status, then auto-refreshes when data arrives.
     """
@@ -101,6 +105,10 @@ def setup_scheduler():
     defillama_collector = DefiLlamaCollector()
     coingecko_collector = CoinGeckoCollector()
 
+    # Thread-safe result queue: scheduler thread → main thread
+    result_queue: queue.Queue = queue.Queue()
+    st.session_state["collector_queue"] = result_queue
+
     def _run_collection():
         """Core collection + alert evaluation."""
         from database.connection import ScopedSession
@@ -113,11 +121,12 @@ def setup_scheduler():
                 ok = collector.safe_collect()
                 if ok:
                     result["etherscan"] = "success"
-                    result["stats"] = collector.last_stats
+                    import copy
+                    result["stats"] = copy.deepcopy(collector.last_stats)
                     try:
                         result["alerts"] = evaluate_all_rules()
                     except Exception:
-                        pass
+                        logging.error("[scheduler] Alert evaluation failed", exc_info=True)
                 else:
                     result["etherscan"] = "failed"
                     result["error"] = "Etherscan API 调用失败，请检查 API Key 是否正确"
@@ -130,20 +139,19 @@ def setup_scheduler():
                 if defillama_collector.safe_collect():
                     result["defillama"] = "success"
             except Exception:
-                pass
+                logging.error("[scheduler] DeFiLlama collection failed", exc_info=True)
             try:
                 whale_collector.safe_collect()
             except Exception:
-                pass
+                logging.error("[scheduler] Whale Alert collection failed", exc_info=True)
             try:
                 coingecko_collector.safe_collect()
             except Exception:
-                pass
+                logging.error("[scheduler] CoinGecko collection failed", exc_info=True)
 
-            st.session_state["last_collect_result"] = result
-            st.session_state["last_collect_time"] = datetime.utcnow()
+            # Push results to main thread via thread-safe queue
+            result_queue.put({"result": result, "time": datetime.utcnow()})
         finally:
-            # Release thread-local DB connection back to pool
             ScopedSession.remove()
 
     def daily_cleanup():
@@ -160,8 +168,15 @@ def setup_scheduler():
             session.commit()
         finally:
             ScopedSession.remove()
-        with engine.connect() as conn:
-            conn.exec_driver_sql("VACUUM")
+        # VACUUM needs an exclusive lock — retry if collector is mid-transaction
+        for attempt in range(5):
+            try:
+                with engine.connect() as conn:
+                    conn.exec_driver_sql("VACUUM")
+                break
+            except Exception as e:
+                logging.warning(f"[cleanup] VACUUM attempt {attempt+1} failed: {e}")
+                time.sleep(5)
 
     scheduler = BackgroundScheduler()
     interval = st.session_state.get("poll_interval", 120)
@@ -180,183 +195,193 @@ def setup_scheduler():
 def main():
     from database.connection import ScopedSession
 
-    st.title("🔍 链上数据监控面板")
-    st.caption("追踪链上资金流向、巨鲸动向和市场异动事件")
+    try:
+        # Drain result queue from background scheduler (thread-safe)
+        cq = st.session_state.get("collector_queue")
+        if cq is not None:
+            try:
+                while True:
+                    msg = cq.get_nowait()
+                    st.session_state["last_collect_result"] = msg["result"]
+                    st.session_state["last_collect_time"] = msg["time"]
+            except queue.Empty:
+                pass
 
-    # Sidebar
-    render_sidebar()
+        st.title("🔍 链上数据监控面板")
+        st.caption("追踪链上资金流向、巨鲸动向和市场异动事件")
 
-    # Initialize session state
-    if "scheduler" not in st.session_state:
-        st.session_state["scheduler"] = None
-    if "last_refresh" not in st.session_state:
-        st.session_state["last_refresh"] = time.time()
-    # Auto-start collector on first load
-    if "collector_running" not in st.session_state:
-        st.session_state["collector_running"] = True
+        # Sidebar
+        render_sidebar()
 
-    # Start/stop collector
-    collector_started_this_run = False
-    if st.session_state.get("collector_running", False):
-        if st.session_state["scheduler"] is None:
-            scheduler, collector = setup_scheduler()
-            st.session_state["scheduler"] = scheduler
-            st.session_state["collector_started_at"] = time.time()
-            collector_started_this_run = True
-    else:
-        if st.session_state["scheduler"] is not None:
-            st.session_state["scheduler"].shutdown(wait=False)
+        # Initialize session state
+        if "scheduler" not in st.session_state:
             st.session_state["scheduler"] = None
-
-    # Status bar
-    api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
-    running = st.session_state.get("collector_running", False)
-    has_data = st.session_state.get("last_collect_time") is not None
-    status_color = "🟢" if (api_ok and running and has_data) else "🟡" if (api_ok and running) else "🔴"
-    status_text = "采集中" if (api_ok and running and has_data) else "启动中..." if (api_ok and running) else "需要API Key"
-
-    # Cached counts (refreshed every 30s to avoid DB pressure on rerun)
-    @st.cache_data(ttl=30)
-    def _cached_alert_count():
-        return get_unacknowledged_alert_count()
-
-    @st.cache_data(ttl=30)
-    def _cached_addr_count():
-        return get_session().query(MonitoredAddress).filter(MonitoredAddress.is_active == True).count()
-
-    alert_count = _cached_alert_count()
-    addr_count = _cached_addr_count()
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("运行状态", f"{status_color} {status_text}")
-    col2.metric("未读警报", alert_count)
-    col3.metric("监控地址数", addr_count)
-    col4.metric("API配置", f"Etherscan: {'✓ 已配置' if api_ok else '✗ 未配置'}")
-
-    # Show collection status (if collector is running)
-    if running:
-        last_result = st.session_state.get("last_collect_result")
-        last_time = st.session_state.get("last_collect_time")
-        if last_time:
-            elapsed = (datetime.utcnow() - last_time).total_seconds()
-            if last_result and last_result.get("error"):
-                st.error(f"⚠️ 采集异常: {last_result['error']}")
-            elif last_result and last_result.get("etherscan") == "success":
-                stats = last_result.get("stats") or {}
-                transfers = stats.get("total_new_transfers", 0)
-                addrs = stats.get("total_addresses", 0)
-                alerts = last_result.get("alerts", 0)
-                chain_details = stats.get("chain_details", [])
-                detail_parts = [f"最近更新: {elapsed:.0f}秒前"]
-                if transfers > 0:
-                    detail_parts.append(f"新增 {transfers} 笔转账")
-                else:
-                    detail_parts.append(f"扫描 {addrs} 个地址无新转账")
-                if chain_details:
-                    for cd in chain_details:
-                        detail_parts.append(f"{cd['chain']}: {cd.get('new_transfers', 0)}笔 (区块 {cd.get('block_range', '?')})")
-                if alerts > 0:
-                    detail_parts.append(f"触发 {alerts} 个警报")
-                st.success(f"✅ 数据采集正常 ({', '.join(detail_parts)})")
-            elif last_result and last_result.get("etherscan") == "failed":
-                st.error("❌ Etherscan 连接失败，请确认 API Key 有效")
-            else:
-                st.info(f"⏳ 等待首次采集... ({elapsed:.0f}秒前开始)")
-        else:
-            st.info("⏳ 等待首次采集...")
-
-        # Per-chain status row
-        from database.queries import get_poll_state as _get_poll
-        cols = st.columns(2)
-        chain_labels = {"ethereum": "Ethereum", "arbitrum": "Arbitrum"}
-        for i, (chain_key, label) in enumerate(chain_labels.items()):
-            poll = _get_poll(f"etherscan_{chain_key}")
-            with cols[i]:
-                if poll and poll.last_timestamp:
-                    gap = (datetime.utcnow() - poll.last_timestamp).total_seconds()
-                    if gap < 300:
-                        st.caption(f"🟢 {label}: {gap:.0f}秒前 · 区块 {poll.last_block:,}")
-                    elif gap < 1800:
-                        st.caption(f"🟡 {label}: {gap/60:.0f}分钟前 · 区块 {poll.last_block:,}")
-                    else:
-                        st.caption(f"🔴 {label}: {gap/3600:.1f}小时前 · 区块 {poll.last_block:,}")
-                else:
-                    st.caption(f"⚪ {label}: 暂无数据")
-
-    st.divider()
-
-    # Main dashboard layout
-    # Row 0: Market Intelligence Brief
-    render_market_intel()
-
-    st.divider()
-
-    # Row 1: Alerts
-    render_alerts()
-
-    st.divider()
-
-    # Row 2: Key metrics
-    render_metrics()
-
-    st.divider()
-
-    # Row 3: Time pattern analysis
-    render_hourly_heatmap()
-
-    st.divider()
-
-    # Row 3.5: Price-Flow correlation
-    render_price_flow_chart()
-
-    st.divider()
-
-    # Row 4: Exchange balance chart
-    render_exchange_balance_chart()
-
-    st.divider()
-
-    # Row 5: Exchange flow chart + Transfer table
-    col_chart, col_table = st.columns([6, 5])
-    with col_chart:
-        render_exchange_flow_chart()
-    with col_table:
-        render_transfer_table()
-
-    st.divider()
-
-    # Row 6: Mint/burn + Whale movements
-    col_mint, col_whale = st.columns(2)
-    with col_mint:
-        render_mint_burn_timeline()
-    with col_whale:
-        render_whale_movements()
-
-    # Auto-refresh: fast (5s) while waiting, then 30s to maintain WebSocket
-    has_data = st.session_state.get("last_collect_time") is not None
-    effective_interval = 30 if has_data else 5  # 30s keeps connection alive, prevents sleep
-    elapsed = time.time() - st.session_state.get("last_refresh", time.time())
-    next_refresh = max(0, effective_interval - elapsed)
-
-    with st.sidebar:
-        st.divider()
-        if has_data:
-            st.caption(f"⏱️ 下次刷新: {next_refresh:.0f}秒 · 每30秒自动保活")
-        else:
-            st.caption(f"⏳ 等待首次数据... ({elapsed:.0f}秒)")
-        if st.button("🔄 刷新面板"):
+        if "last_refresh" not in st.session_state:
             st.session_state["last_refresh"] = time.time()
-            ScopedSession.remove()
+        # Auto-start collector on first load
+        if "collector_running" not in st.session_state:
+            st.session_state["collector_running"] = True
+
+        # Start/stop collector
+        collector_started_this_run = False
+        if st.session_state.get("collector_running", False):
+            if st.session_state["scheduler"] is None:
+                scheduler, collector = setup_scheduler()
+                st.session_state["scheduler"] = scheduler
+                st.session_state["collector_started_at"] = time.time()
+                collector_started_this_run = True
+        else:
+            if st.session_state["scheduler"] is not None:
+                st.session_state["scheduler"].shutdown(wait=False)
+                st.session_state["scheduler"] = None
+
+        # Status bar
+        api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
+        running = st.session_state.get("collector_running", False)
+        has_data = st.session_state.get("last_collect_time") is not None
+        status_color = "🟢" if (api_ok and running and has_data) else "🟡" if (api_ok and running) else "🔴"
+        status_text = "采集中" if (api_ok and running and has_data) else "启动中..." if (api_ok and running) else "需要API Key"
+
+        # Cached counts (refreshed every 30s to avoid DB pressure on rerun)
+        @st.cache_data(ttl=30)
+        def _cached_alert_count():
+            return get_unacknowledged_alert_count()
+
+        @st.cache_data(ttl=30)
+        def _cached_addr_count():
+            return get_session().query(MonitoredAddress).filter(MonitoredAddress.is_active == True).count()
+
+        alert_count = _cached_alert_count()
+        addr_count = _cached_addr_count()
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("运行状态", f"{status_color} {status_text}")
+        col2.metric("未读警报", alert_count)
+        col3.metric("监控地址数", addr_count)
+        col4.metric("API配置", f"Etherscan: {'✓ 已配置' if api_ok else '✗ 未配置'}")
+
+        # Show collection status (if collector is running)
+        if running:
+            last_result = st.session_state.get("last_collect_result")
+            last_time = st.session_state.get("last_collect_time")
+            if last_time:
+                elapsed = (datetime.utcnow() - last_time).total_seconds()
+                if last_result and last_result.get("error"):
+                    st.error(f"⚠️ 采集异常: {last_result['error']}")
+                elif last_result and last_result.get("etherscan") == "success":
+                    stats = last_result.get("stats") or {}
+                    transfers = stats.get("total_new_transfers", 0)
+                    addrs = stats.get("total_addresses", 0)
+                    alerts = last_result.get("alerts", 0)
+                    chain_details = stats.get("chain_details", [])
+                    detail_parts = [f"最近更新: {elapsed:.0f}秒前"]
+                    if transfers > 0:
+                        detail_parts.append(f"新增 {transfers} 笔转账")
+                    else:
+                        detail_parts.append(f"扫描 {addrs} 个地址无新转账")
+                    if chain_details:
+                        for cd in chain_details:
+                            detail_parts.append(f"{cd['chain']}: {cd.get('new_transfers', 0)}笔 (区块 {cd.get('block_range', '?')})")
+                    if alerts > 0:
+                        detail_parts.append(f"触发 {alerts} 个警报")
+                    st.success(f"✅ 数据采集正常 ({', '.join(detail_parts)})")
+                elif last_result and last_result.get("etherscan") == "failed":
+                    st.error("❌ Etherscan 连接失败，请确认 API Key 有效")
+                else:
+                    st.info(f"⏳ 等待首次采集... ({elapsed:.0f}秒前开始)")
+            else:
+                st.info("⏳ 等待首次采集...")
+
+            # Per-chain status row
+            from database.queries import get_poll_state as _get_poll
+            cols = st.columns(2)
+            chain_labels = {"ethereum": "Ethereum", "arbitrum": "Arbitrum"}
+            for i, (chain_key, label) in enumerate(chain_labels.items()):
+                poll = _get_poll(f"etherscan_{chain_key}")
+                with cols[i]:
+                    if poll and poll.last_timestamp:
+                        gap = (datetime.utcnow() - poll.last_timestamp).total_seconds()
+                        if gap < 300:
+                            st.caption(f"🟢 {label}: {gap:.0f}秒前 · 区块 {poll.last_block:,}")
+                        elif gap < 1800:
+                            st.caption(f"🟡 {label}: {gap/60:.0f}分钟前 · 区块 {poll.last_block:,}")
+                        else:
+                            st.caption(f"🔴 {label}: {gap/3600:.1f}小时前 · 区块 {poll.last_block:,}")
+                    else:
+                        st.caption(f"⚪ {label}: 暂无数据")
+
+        st.divider()
+
+        # Main dashboard layout
+        # Row 0: Market Intelligence Brief
+        render_market_intel()
+
+        st.divider()
+
+        # Row 1: Alerts
+        render_alerts()
+
+        st.divider()
+
+        # Row 2: Key metrics
+        render_metrics()
+
+        st.divider()
+
+        # Row 3: Time pattern analysis
+        render_hourly_heatmap()
+
+        st.divider()
+
+        # Row 3.5: Price-Flow correlation
+        render_price_flow_chart()
+
+        st.divider()
+
+        # Row 4: Exchange balance chart
+        render_exchange_balance_chart()
+
+        st.divider()
+
+        # Row 5: Exchange flow chart + Transfer table
+        col_chart, col_table = st.columns([6, 5])
+        with col_chart:
+            render_exchange_flow_chart()
+        with col_table:
+            render_transfer_table()
+
+        st.divider()
+
+        # Row 6: Mint/burn + Whale movements
+        col_mint, col_whale = st.columns(2)
+        with col_mint:
+            render_mint_burn_timeline()
+        with col_whale:
+            render_whale_movements()
+
+        # Auto-refresh: fast (5s) while waiting, then 30s to maintain WebSocket
+        has_data = st.session_state.get("last_collect_time") is not None
+        effective_interval = 30 if has_data else 5  # 30s keeps connection alive, prevents sleep
+        elapsed = time.time() - st.session_state.get("last_refresh", time.time())
+        next_refresh = max(0, effective_interval - elapsed)
+
+        with st.sidebar:
+            st.divider()
+            if has_data:
+                st.caption(f"⏱️ 下次刷新: {next_refresh:.0f}秒 · 每30秒自动保活")
+            else:
+                st.caption(f"⏳ 等待首次数据... ({elapsed:.0f}秒)")
+            if st.button("🔄 刷新面板"):
+                st.session_state["last_refresh"] = time.time()
+                st.rerun()
+
+        # Auto-refresh to keep WebSocket alive and prevent Streamlit Cloud sleep
+        if next_refresh <= 0:
+            st.session_state["last_refresh"] = time.time()
+            time.sleep(0.3)
             st.rerun()
-
-    # Auto-refresh to keep WebSocket alive and prevent Streamlit Cloud sleep
-    if next_refresh <= 0:
-        st.session_state["last_refresh"] = time.time()
-        time.sleep(0.3)
+    finally:
         ScopedSession.remove()
-        st.rerun()
-
-    ScopedSession.remove()
 
 
 if __name__ == "__main__":

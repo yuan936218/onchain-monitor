@@ -51,15 +51,15 @@ def send_alert(alert):
     }
 
     try:
-        client = make_client(timeout=15)
-        resp = client.post(webhook_url, json=card)
-        if resp.status_code == 200:
-            result = resp.json()
-            if result.get("code") == 0:
-                logger.info(f"[feishu] Alert sent: {alert.title}")
+        with make_client(timeout=15) as client:
+            resp = client.post(webhook_url, json=card)
+            if resp.status_code == 200:
+                result = resp.json()
+                if result.get("code") == 0:
+                    logger.info(f"[feishu] Alert sent: {alert.title}")
+                else:
+                    logger.warning(f"[feishu] Send failed: {result}")
             else:
-                logger.warning(f"[feishu] Send failed: {result}")
-        else:
-            logger.warning(f"[feishu] HTTP {resp.status_code}")
+                logger.warning(f"[feishu] HTTP {resp.status_code}")
     except Exception as e:
         logger.error(f"[feishu] Error sending alert: {e}")

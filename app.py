@@ -101,56 +101,64 @@ def setup_scheduler():
     coingecko_collector = CoinGeckoCollector()
 
     def _run_collection():
-        """Core collection + alert evaluation. Used by both catch-up and regular jobs."""
+        """Core collection + alert evaluation."""
+        from database.connection import ScopedSession
+
         api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
         result = {"etherscan": None, "defillama": None, "alerts": 0, "error": None, "stats": None}
 
-        if api_ok:
-            ok = collector.safe_collect()
-            if ok:
-                result["etherscan"] = "success"
-                result["stats"] = collector.last_stats
-                try:
-                    result["alerts"] = evaluate_all_rules()
-                except Exception:
-                    pass
+        try:
+            if api_ok:
+                ok = collector.safe_collect()
+                if ok:
+                    result["etherscan"] = "success"
+                    result["stats"] = collector.last_stats
+                    try:
+                        result["alerts"] = evaluate_all_rules()
+                    except Exception:
+                        pass
+                else:
+                    result["etherscan"] = "failed"
+                    result["error"] = "Etherscan API 调用失败，请检查 API Key 是否正确"
             else:
-                result["etherscan"] = "failed"
-                result["error"] = "Etherscan API 调用失败，请检查 API Key 是否正确"
-        else:
-            result["etherscan"] = "skipped"
-            result["error"] = "未配置 Etherscan API Key"
+                result["etherscan"] = "skipped"
+                result["error"] = "未配置 Etherscan API Key"
 
-        # Supplementary collectors (best-effort)
-        try:
-            if defillama_collector.safe_collect():
-                result["defillama"] = "success"
-        except Exception:
-            pass
-        try:
-            whale_collector.safe_collect()
-        except Exception:
-            pass
-        try:
-            coingecko_collector.safe_collect()
-        except Exception:
-            pass
+            # Supplementary collectors (best-effort)
+            try:
+                if defillama_collector.safe_collect():
+                    result["defillama"] = "success"
+            except Exception:
+                pass
+            try:
+                whale_collector.safe_collect()
+            except Exception:
+                pass
+            try:
+                coingecko_collector.safe_collect()
+            except Exception:
+                pass
 
-        st.session_state["last_collect_result"] = result
-        st.session_state["last_collect_time"] = datetime.utcnow()
+            st.session_state["last_collect_result"] = result
+            st.session_state["last_collect_time"] = datetime.utcnow()
+        finally:
+            # Release thread-local DB connection back to pool
+            ScopedSession.remove()
 
     def daily_cleanup():
-        from database.connection import get_session, engine
+        from database.connection import get_session, engine, ScopedSession
         from database.models import StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert, ExchangeBalanceSnapshot, PriceSnapshot
         retention = st.session_state.get("retention_days", 90)
         cutoff = datetime.utcnow() - timedelta(days=retention)
-        session = get_session()
-        for model in [StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert, ExchangeBalanceSnapshot, PriceSnapshot]:
-            deleted = session.query(model).filter(model.detected_at < cutoff).delete()
-            if deleted:
-                logging.info(f"[cleanup] Deleted {deleted} old {model.__tablename__} records")
-        session.commit()
-        session.close()
+        try:
+            session = get_session()
+            for model in [StablecoinTransfer, WhaleMovement, MintBurnEvent, Alert, ExchangeBalanceSnapshot, PriceSnapshot]:
+                deleted = session.query(model).filter(model.detected_at < cutoff).delete()
+                if deleted:
+                    logging.info(f"[cleanup] Deleted {deleted} old {model.__tablename__} records")
+            session.commit()
+        finally:
+            ScopedSession.remove()
         with engine.connect() as conn:
             conn.exec_driver_sql("VACUUM")
 

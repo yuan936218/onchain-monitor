@@ -13,8 +13,10 @@ engine = create_engine(
     DATABASE_URL,
     echo=False,
     connect_args={"check_same_thread": False, "timeout": 30},
-    pool_size=5,
-    pool_timeout=60,
+    pool_size=10,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_pre_ping=True,
 )
 
 # Enable WAL mode for concurrent reads (dashboard) + writes (collector)

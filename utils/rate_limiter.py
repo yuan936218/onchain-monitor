@@ -28,8 +28,8 @@ class RateLimiter:
                 wait = self.daily_reset + 86400 - now
                 raise Exception(f"Daily rate limit reached. Resets in {wait:.0f}s")
 
-            # Remove timestamps older than 1 second
-            while self.timestamps and now - self.timestamps[0] > 1.0:
+            # Remove timestamps older than 1 second (>= to avoid boundary overlap)
+            while self.timestamps and now - self.timestamps[0] >= 1.0:
                 self.timestamps.popleft()
 
             # Check per-second limit
@@ -37,9 +37,9 @@ class RateLimiter:
                 sleep_time = 1.0 - (now - self.timestamps[0])
                 if sleep_time > 0:
                     time.sleep(sleep_time)
-                # Clean up after sleep
-                cutoff = time.time() - 1.0
-                while self.timestamps and self.timestamps[0] < cutoff:
+                # Clean up after sleep (<= to match the >= boundary above)
+                now_after = time.time()
+                while self.timestamps and now_after - self.timestamps[0] >= 1.0:
                     self.timestamps.popleft()
 
             self.timestamps.append(time.time())

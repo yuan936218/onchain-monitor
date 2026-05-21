@@ -80,13 +80,13 @@ def seed_addresses():
 seed_addresses()
 
 
-def setup_scheduler(run_sync_first=True):
-    """Configure and start the APScheduler background collectors.
+def setup_scheduler():
+    """Start background collectors WITHOUT blocking page render.
 
-    On first load, runs a catch-up collection for ALL chains in parallel
-    to recover data missed while the app was sleeping (Streamlit Cloud free
-    tier kills idle processes). The background scheduler then keeps data
-    fresh while the user has the page open.
+    A one-shot catch-up job fires immediately (1s delay), then the regular
+    interval collector takes over. This avoids the ~60s white screen on first
+    load — the dashboard renders instantly with "waiting for first collection"
+    status, then auto-refreshes when data arrives.
     """
     from apscheduler.schedulers.background import BackgroundScheduler
     from collectors.etherscan_collector import EtherscanCollector
@@ -94,73 +94,34 @@ def setup_scheduler(run_sync_first=True):
     from collectors.defillama_collector import DefiLlamaCollector
     from collectors.coingecko_collector import CoinGeckoCollector
     from alerts.engine import evaluate_all_rules
-    from database.queries import get_poll_state
 
     collector = EtherscanCollector()
     whale_collector = WhaleAlertCollector()
     defillama_collector = DefiLlamaCollector()
     coingecko_collector = CoinGeckoCollector()
 
-    # ── Catch-up collection on startup ──
-    if run_sync_first:
+    def _run_collection():
+        """Core collection + alert evaluation. Used by both catch-up and regular jobs."""
         api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
         result = {"etherscan": None, "defillama": None, "alerts": 0, "error": None, "stats": None}
-        chain_status = {}
 
         if api_ok:
-            # Check how stale each chain is
-            from config.settings import CHAIN_CONFIG
-            for chain_key in ["ethereum", "arbitrum"]:
-                poll = get_poll_state(f"etherscan_{chain_key}")
-                chain_status[chain_key] = {
-                    "last_block": poll.last_block if poll else None,
-                    "last_time": poll.last_timestamp if poll else None,
-                }
-
-            # Collect chains sequentially (rate limiter is 3/sec shared across chains)
-            all_stats = []
-            errors = []
-            sess = get_session()
-            try:
-                for chain in ["ethereum", "arbitrum"]:
-                    try:
-                        stats = collector._collect_chain(chain, sess, skip_balance_snapshot=True)
-                        all_stats.append(stats)
-                        if stats.get("error"):
-                            errors.append(f"{chain}: {stats['error']}")
-                    except Exception as e:
-                        errors.append(f"{chain}: {str(e)[:200]}")
-            finally:
-                sess.close()
-
-            # Run alerts
-            try:
-                alerts_created = evaluate_all_rules()
-            except Exception as e:
-                alerts_created = 0
-                errors.append(f"alerts: {str(e)[:100]}")
-
-            result["etherscan"] = "success" if not errors else "failed"
-            result["stats"] = {
-                "chains": len(all_stats),
-                "total_addresses": sum(s.get("addresses", 0) for s in all_stats),
-                "chain_details": all_stats,
-                "total_new_transfers": sum(s.get("new_transfers", 0) for s in all_stats),
-                "total_new_whale_moves": sum(s.get("new_whale_moves", 0) for s in all_stats),
-                "total_api_responses": sum(s.get("api_responses", 0) for s in all_stats),
-                "total_api_errors": sum(s.get("api_errors", 0) for s in all_stats),
-            }
-            result["alerts"] = alerts_created
-            result["error"] = "; ".join(errors) if errors else None
-            result["chain_status"] = chain_status
+            ok = collector.safe_collect()
+            if ok:
+                result["etherscan"] = "success"
+                result["stats"] = collector.last_stats
+                try:
+                    result["alerts"] = evaluate_all_rules()
+                except Exception:
+                    pass
+            else:
+                result["etherscan"] = "failed"
+                result["error"] = "Etherscan API 调用失败，请检查 API Key 是否正确"
         else:
             result["etherscan"] = "skipped"
-            result["error"] = "未配置 Etherscan API Key，请在侧边栏输入或设置 Streamlit Secrets"
+            result["error"] = "未配置 Etherscan API Key"
 
-        st.session_state["last_collect_result"] = result
-        st.session_state["last_collect_time"] = datetime.utcnow()
-
-        # Run other collectors
+        # Supplementary collectors (best-effort)
         try:
             if defillama_collector.safe_collect():
                 result["defillama"] = "success"
@@ -175,26 +136,6 @@ def setup_scheduler(run_sync_first=True):
         except Exception:
             pass
 
-    # ── Background scheduler (runs while user has page open) ──
-    def collect_all():
-        api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
-        result = {"etherscan": None, "defillama": None, "alerts": 0, "error": None, "stats": None}
-        if api_ok:
-            ok = collector.safe_collect()
-            if ok:
-                result["etherscan"] = "success"
-                result["stats"] = collector.last_stats
-                result["alerts"] = evaluate_all_rules()
-            else:
-                result["etherscan"] = "failed"
-                result["error"] = "Etherscan API 调用失败，请检查 API Key 是否正确"
-        else:
-            result["etherscan"] = "skipped"
-            result["error"] = "未配置 Etherscan API Key"
-        if defillama_collector.safe_collect():
-            result["defillama"] = "success"
-        whale_collector.safe_collect()
-        coingecko_collector.safe_collect()
         st.session_state["last_collect_result"] = result
         st.session_state["last_collect_time"] = datetime.utcnow()
 
@@ -215,7 +156,13 @@ def setup_scheduler(run_sync_first=True):
 
     scheduler = BackgroundScheduler()
     interval = st.session_state.get("poll_interval", 120)
-    scheduler.add_job(collect_all, "interval", seconds=interval, id="collector_job")
+    # Single job: fires immediately, then every `interval` seconds.
+    # max_instances=1 prevents overlap if collection takes longer than interval.
+    scheduler.add_job(
+        _run_collection, "interval", seconds=interval,
+        next_run_time=datetime.now(),  # fire immediately on start
+        id="collector_job", max_instances=1,
+    )
     scheduler.add_job(daily_cleanup, "interval", hours=24, id="cleanup_job")
     scheduler.start()
     return scheduler, collector
@@ -238,22 +185,24 @@ def main():
         st.session_state["collector_running"] = True
 
     # Start/stop collector
+    collector_started_this_run = False
     if st.session_state.get("collector_running", False):
         if st.session_state["scheduler"] is None:
             scheduler, collector = setup_scheduler()
             st.session_state["scheduler"] = scheduler
-            st.toast("✅ 数据采集已启动!")
+            st.session_state["collector_started_at"] = time.time()
+            collector_started_this_run = True
     else:
         if st.session_state["scheduler"] is not None:
             st.session_state["scheduler"].shutdown(wait=False)
             st.session_state["scheduler"] = None
-            st.toast("⏸️ 数据采集已停止")
 
     # Status bar
     api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
     running = st.session_state.get("collector_running", False)
-    status_color = "🟢" if (api_ok and running) else "🟡" if api_ok else "🔴"
-    status_text = "采集中" if (api_ok and running) else "就绪 (API已配置)" if api_ok else "需要API Key"
+    has_data = st.session_state.get("last_collect_time") is not None
+    status_color = "🟢" if (api_ok and running and has_data) else "🟡" if (api_ok and running) else "🔴"
+    status_text = "采集中" if (api_ok and running and has_data) else "启动中..." if (api_ok and running) else "需要API Key"
 
     alert_count = get_unacknowledged_alert_count()
 
@@ -362,27 +311,27 @@ def main():
     with col_whale:
         render_whale_movements()
 
-    # Auto-refresh countdown
+    # Auto-refresh: fast (5s) while waiting for first data, then normal interval
+    has_data = st.session_state.get("last_collect_time") is not None
     poll_interval = st.session_state.get("poll_interval", 120)
+    effective_interval = poll_interval if has_data else 5  # fast refresh until first data
     elapsed = time.time() - st.session_state.get("last_refresh", time.time())
-    next_refresh = max(0, poll_interval - elapsed)
+    next_refresh = max(0, effective_interval - elapsed)
 
     with st.sidebar:
         st.divider()
-        st.caption(f"下次自动刷新: {next_refresh:.0f}秒")
+        if has_data:
+            st.caption(f"下次自动刷新: {next_refresh:.0f}秒")
+        else:
+            st.caption(f"⏳ 等待首次数据... ({elapsed:.0f}秒)")
         if st.button("🔄 刷新面板"):
             st.session_state["last_refresh"] = time.time()
             st.rerun()
 
-    # Auto-refresh if collector is running
-    if running and next_refresh <= 0:
+    # Auto-refresh
+    if next_refresh <= 0:
         st.session_state["last_refresh"] = time.time()
-        time.sleep(0.5)
-        st.rerun()
-
-    # Periodic refresh if collector is not running
-    if not running:
-        time.sleep(poll_interval)
+        time.sleep(0.3)
         st.rerun()
 
 

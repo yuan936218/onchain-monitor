@@ -1,6 +1,8 @@
 """Dashboard sidebar component — Chinese UI."""
 
+import os
 import streamlit as st
+from datetime import datetime
 from config.settings import (
     THRESHOLD_LARGE_TRANSFER, THRESHOLD_EXCHANGE_INFLOW,
     THRESHOLD_WHALE_MOVE, DEFAULT_POLL_INTERVAL_SECONDS,
@@ -107,16 +109,58 @@ def render_sidebar():
                 else:
                     st.warning("请先输入 Key")
 
+        # Feishu webhook: prefer Secrets, then env, then session_state
+        from config.settings import FEISHU_WEBHOOK_URL as _configured_feishu
+        feishu_from_config = _configured_feishu
+        feishu_default = feishu_from_config or st.session_state.get("feishu_webhook", "")
+
         feishu_url = st.text_input(
             "飞书 Webhook URL",
             type="password",
-            value=st.session_state.get("feishu_webhook", ""),
+            value=feishu_default,
             help="飞书群 → 设置 → 群机器人 → 添加机器人 → 复制 Webhook 地址",
         )
         if feishu_url != st.session_state.get("feishu_webhook", ""):
             st.session_state["feishu_webhook"] = feishu_url
             import os
             os.environ["FEISHU_WEBHOOK_URL"] = feishu_url
+
+        # Hint if only set via sidebar (not persisted)
+        if not feishu_from_config and feishu_url:
+            st.caption("💡 建议添加到 Streamlit Secrets 中持久化：`FEISHU_WEBHOOK_URL = \"你的webhook\"`")
+
+        if st.button("🧪 测试飞书", help="发送测试消息验证 Webhook"):
+            if feishu_url:
+                import httpx
+                from collectors.base import make_client
+                try:
+                    client = make_client(timeout=15)
+                    test_card = {
+                        "msg_type": "interactive",
+                        "card": {
+                            "header": {
+                                "title": {"tag": "plain_text", "content": "🧪 飞书通知测试"},
+                                "template": "blue",
+                            },
+                            "elements": [
+                                {"tag": "markdown", "content": "这是一条来自**链上数据监控面板**的测试消息。\n\n如果你的飞书群收到这条消息，说明 Webhook 配置正确 ✅"},
+                                {"tag": "note", "elements": [{"tag": "plain_text", "content": f"链上监控 v2.1 · 测试时间 {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"}]},
+                            ],
+                        },
+                    }
+                    resp = client.post(feishu_url, json=test_card)
+                    if resp.status_code == 200:
+                        result = resp.json()
+                        if result.get("code") == 0:
+                            st.success("✅ 飞书测试消息已发送，请检查飞书群")
+                        else:
+                            st.error(f"❌ 飞书返回错误: {result}")
+                    else:
+                        st.error(f"❌ HTTP {resp.status_code}")
+                except Exception as e:
+                    st.error(f"❌ 连接失败: {str(e)[:80]}")
+            else:
+                st.warning("请先输入 Webhook URL")
 
         st.divider()
 

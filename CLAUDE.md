@@ -32,3 +32,20 @@
 - User is a crypto futures trader, not a developer ("我不懂代码")
 - User is in China — GitHub HTTPS often blocked by GFW, use SSH
 - Claude must respond in **Chinese only** at all times
+
+## Latest changes (2026-05-20, commit e52f60e)
+12. **Market Intelligence Brief** — dashboard top component that synthesizes all data sources (exchange flows, whale moves, balance changes, mint/burn) into natural language Chinese insights with bull/bear signals.
+13. **Price-Flow Correlation Chart** — dual-axis Plotly chart overlaying ETH/WBTC price (from CoinGecko) with net exchange flow. Price history stored in new `price_snapshots` table, collected every 15 min.
+14. **Statistical Anomaly Detection** — Z-score based flow anomaly alerts comparing current UTC hour against 14-day historical baseline. Flags when |Z| > 2.0.
+15. **Python 3.9 compatibility** — added `from __future__ import annotations` to files using `X | None` type syntax (`coingecko_collector.py`, `address_labeler.py`, `formatters.py`). This was the root cause of the Streamlit Cloud ImportError.
+
+## Database tables (9 total)
+- `monitored_addresses`, `stablecoin_transfers`, `whale_movements`, `mint_burn_events`, `daily_aggregates`, `alerts`, `poll_state`, `exchange_balance_snapshots`, `price_snapshots`
+
+## Dashboard layout order
+1. Market Intelligence Brief 2. Alerts 3. Key Metrics 4. Time Pattern Heatmap
+5. Price-Flow Correlation 6. Exchange Balance Chart 7. Exchange Flow Chart + Transfer Table
+8. Mint/Burn + Whale Movements
+
+## Latest changes (2026-05-21, commit pending)
+16. **Fast startup optimization** — catch-up phase skips balance snapshots (50% fewer API calls), reducing first-load time from ~2 min to ~1 min. Balance snapshots handled by background scheduler within first 2 minutes of normal operation.

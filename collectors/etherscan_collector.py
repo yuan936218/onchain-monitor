@@ -123,7 +123,7 @@ class EtherscanCollector(BaseCollector):
             logger.warning(f"[etherscan] API error for {address} native: {data.get('message', data)}")
             return []
 
-    def _collect_chain(self, chain: str, session):
+    def _collect_chain(self, chain: str, session, skip_balance_snapshot: bool = False):
         """Collect transfers for a single chain. Returns stats dict."""
         chain_id = CHAIN_CONFIG[chain]["chain_id"]
         tokens = MONITORED_TOKENS.get(chain, {})
@@ -294,7 +294,8 @@ class EtherscanCollector(BaseCollector):
                     continue
 
         # Snapshot exchange balances (time-gated every 15 min)
-        self._snapshot_balances(chain, session)
+        if not skip_balance_snapshot:
+            self._snapshot_balances(chain, session)
 
         # Persist transfers (balance snapshot may have already committed)
         session.commit()

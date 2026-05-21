@@ -124,7 +124,7 @@ def setup_scheduler(run_sync_first=True):
             try:
                 for chain in ["ethereum", "arbitrum"]:
                     try:
-                        stats = collector._collect_chain(chain, sess)
+                        stats = collector._collect_chain(chain, sess, skip_balance_snapshot=True)
                         all_stats.append(stats)
                         if stats.get("error"):
                             errors.append(f"{chain}: {stats['error']}")

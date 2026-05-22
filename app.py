@@ -3,10 +3,10 @@
 import json
 import sys
 import os
+import copy
 import time
-import queue
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -105,14 +105,11 @@ def setup_scheduler():
     defillama_collector = DefiLlamaCollector()
     coingecko_collector = CoinGeckoCollector()
 
-    # Thread-safe result queue: scheduler thread → main thread
-    result_queue: queue.Queue = queue.Queue()
-    st.session_state["collector_queue"] = result_queue
-
     def _run_collection():
         """Core collection + alert evaluation."""
         from database.connection import ScopedSession
 
+        logging.info("[scheduler] Collection cycle starting")
         api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
         result = {"etherscan": None, "defillama": None, "alerts": 0, "error": None, "stats": None}
 
@@ -121,7 +118,6 @@ def setup_scheduler():
                 ok = collector.safe_collect()
                 if ok:
                     result["etherscan"] = "success"
-                    import copy
                     result["stats"] = copy.deepcopy(collector.last_stats)
                     try:
                         result["alerts"] = evaluate_all_rules()
@@ -149,10 +145,11 @@ def setup_scheduler():
             except Exception:
                 logging.error("[scheduler] CoinGecko collection failed", exc_info=True)
 
-            # Push results to main thread via thread-safe queue
-            result_queue.put({"result": result, "time": datetime.utcnow()})
+            st.session_state["last_collect_result"] = result
+            st.session_state["last_collect_time"] = datetime.utcnow()
         finally:
             ScopedSession.remove()
+            logging.info("[scheduler] Collection cycle finished")
 
     def daily_cleanup():
         from database.connection import get_session, engine, ScopedSession
@@ -196,17 +193,6 @@ def main():
     from database.connection import ScopedSession
 
     try:
-        # Drain result queue from background scheduler (thread-safe)
-        cq = st.session_state.get("collector_queue")
-        if cq is not None:
-            try:
-                while True:
-                    msg = cq.get_nowait()
-                    st.session_state["last_collect_result"] = msg["result"]
-                    st.session_state["last_collect_time"] = msg["time"]
-            except queue.Empty:
-                pass
-
         st.title("🔍 链上数据监控面板")
         st.caption("追踪链上资金流向、巨鲸动向和市场异动事件")
 
@@ -284,7 +270,12 @@ def main():
                             detail_parts.append(f"{cd['chain']}: {cd.get('new_transfers', 0)}笔 (区块 {cd.get('block_range', '?')})")
                     if alerts > 0:
                         detail_parts.append(f"触发 {alerts} 个警报")
-                    st.success(f"✅ 数据采集正常 ({', '.join(detail_parts)})")
+
+                    poll_sec = st.session_state.get("poll_interval", 120)
+                    if elapsed > poll_sec * 2:
+                        st.warning(f"⚠️ 采集延迟: 上次采集 {elapsed:.0f} 秒前（轮询间隔 {poll_sec}秒）。采集器可能已停止，请尝试刷新页面或检查 API Key。")
+                    else:
+                        st.success(f"✅ 数据采集正常 ({', '.join(detail_parts)})")
                 elif last_result and last_result.get("etherscan") == "failed":
                     st.error("❌ Etherscan 连接失败，请确认 API Key 有效")
                 else:

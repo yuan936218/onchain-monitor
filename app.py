@@ -125,7 +125,8 @@ def setup_scheduler():
                         logging.error("[scheduler] Alert evaluation failed", exc_info=True)
                 else:
                     result["etherscan"] = "failed"
-                    result["error"] = "Etherscan API 调用失败，请检查 API Key 是否正确"
+                    detail = getattr(collector, "last_error", None) or ""
+                    result["error"] = f"Etherscan 采集失败: {detail}" if detail else "Etherscan API 调用失败，请检查 API Key 是否正确"
             else:
                 result["etherscan"] = "skipped"
                 result["error"] = "未配置 Etherscan API Key"

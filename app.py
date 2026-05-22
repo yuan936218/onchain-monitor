@@ -40,6 +40,38 @@ from dashboard.market_intel import render_market_intel
 
 logging.basicConfig(level=logging.INFO)
 
+# ── Cross-thread status bridge ──
+# st.session_state writes fail from APScheduler background threads on Streamlit Cloud.
+# We use a JSON file as a reliable fallback for collector → main-thread communication.
+
+STATUS_FILE = os.path.join(os.path.dirname(__file__), "data", "collector_status.json")
+
+
+def _write_status_file(result: dict, now: datetime):
+    """Write collection result to JSON file (called from background thread)."""
+    try:
+        with open(STATUS_FILE, "w") as f:
+            json.dump({"result": result, "time": now.isoformat()}, f)
+    except Exception:
+        pass
+
+
+def _read_status_file():
+    """Read collection result from JSON file. Returns (result, time) or (None, None)."""
+    try:
+        if os.path.exists(STATUS_FILE):
+            with open(STATUS_FILE, "r") as f:
+                data = json.load(f)
+            result = data.get("result")
+            time_str = data.get("time")
+            if time_str:
+                from datetime import datetime as dt
+                return result, dt.fromisoformat(time_str)
+    except Exception:
+        pass
+    return None, None
+
+
 # Initialize database (cached across reruns)
 @st.cache_resource
 def _init_db():
@@ -104,6 +136,7 @@ def setup_scheduler():
     whale_collector = WhaleAlertCollector()
     defillama_collector = DefiLlamaCollector()
     coingecko_collector = CoinGeckoCollector()
+    st.session_state["collector_ref"] = collector
 
     def _run_collection():
         """Core collection + alert evaluation."""
@@ -146,8 +179,16 @@ def setup_scheduler():
             except Exception:
                 logging.error("[scheduler] CoinGecko collection failed", exc_info=True)
 
-            st.session_state["last_collect_result"] = result
-            st.session_state["last_collect_time"] = datetime.utcnow()
+            now = datetime.utcnow()
+            # Write to st.session_state (works locally, may fail on Streamlit Cloud)
+            try:
+                st.session_state["last_collect_result"] = result
+                st.session_state["last_collect_time"] = now
+            except Exception:
+                logging.warning("[scheduler] st.session_state write failed (expected on Streamlit Cloud)")
+
+            # Reliable cross-thread bridge: write status to JSON file
+            _write_status_file(result, now)
         finally:
             ScopedSession.remove()
             logging.info("[scheduler] Collection cycle finished")
@@ -222,7 +263,16 @@ def main():
                 st.session_state["scheduler"].shutdown(wait=False)
                 st.session_state["scheduler"] = None
 
-        # Status bar
+        # Status bar — read from file if session_state is empty (Streamlit Cloud bg thread fix)
+        file_result, file_time = _read_status_file()
+        session_time = st.session_state.get("last_collect_time")
+        if session_time is None and file_time is not None:
+            st.session_state["last_collect_time"] = file_time
+            st.session_state["last_collect_result"] = file_result
+        elif file_time is not None and session_time is not None and file_time > session_time:
+            st.session_state["last_collect_time"] = file_time
+            st.session_state["last_collect_result"] = file_result
+
         api_ok = bool(os.getenv("ETHERSCAN_API_KEY") or ETHERSCAN_API_KEY)
         running = st.session_state.get("collector_running", False)
         has_data = st.session_state.get("last_collect_time") is not None

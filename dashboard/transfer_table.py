@@ -17,7 +17,7 @@ def render_transfer_table():
     with col1:
         hours = st.selectbox(
             "时间范围", options=[1, 6, 12, 24, 72],
-            index=3, format_func=lambda x: f"最近 {x} 小时",
+            index=4, format_func=lambda x: f"最近 {x} 小时",
         )
     with col2:
         token_filter = st.selectbox(
@@ -27,14 +27,14 @@ def render_transfer_table():
         )
     with col3:
         min_val = st.number_input(
-            "最低金额 (USD)", min_value=10_000, max_value=100_000_000,
-            value=100_000, step=10_000, format="%d",
+            "最低金额 (USD)", min_value=0, max_value=100_000_000,
+            value=0, step=10_000, format="%d",
         )
 
     transfers = get_large_transfers(hours=hours, min_value_usd=min_val, token_filter=token_filter, chain=chain)
 
     if not transfers:
-        st.info("当前筛选条件下没有找到大额转账记录。")
+        st.info(f"当前筛选条件下没有找到转账记录（时间: {hours}h, 最低: ${min_val:,.0f}）。\n\n💡 提示：部署后数据库重置，仅包含最近约1.5天的链上数据。尝试调大时间范围或降低金额门槛。")
         return
 
     rows = []

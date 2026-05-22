@@ -88,7 +88,7 @@ def get_24h_aggregates(chain=None, token_filter=None):
     }
 
 
-def get_large_transfers(hours=24, min_value_usd=1_000_000, token_filter=None, chain=None):
+def get_large_transfers(hours=24, min_value_usd=0, token_filter=None, chain=None):
     session = get_session()
     since = datetime.utcnow() - timedelta(hours=hours)
 

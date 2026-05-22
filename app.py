@@ -50,6 +50,7 @@ STATUS_FILE = os.path.join(os.path.dirname(__file__), "data", "collector_status.
 def _write_status_file(result: dict, now: datetime):
     """Write collection result to JSON file (called from background thread)."""
     try:
+        os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
         with open(STATUS_FILE, "w") as f:
             json.dump({"result": result, "time": now.isoformat()}, f)
     except Exception:

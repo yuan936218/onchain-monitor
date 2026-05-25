@@ -290,7 +290,6 @@ class EtherscanCollector(BaseCollector):
                                     )
                                     session.add(mint_event)
                 except Exception as e:
-                    session.rollback()
                     api_errors += 1
                     logger.warning(f"[etherscan] Error fetching {symbol} for {addr.label} on {chain}: {e}")
                     continue
@@ -396,7 +395,6 @@ class EtherscanCollector(BaseCollector):
                     session.add(snapshot)
                     snapshots_saved += 1
                 except Exception as e:
-                    session.rollback()
                     logger.debug(f"[etherscan] Balance snapshot error {symbol} {addr.label} {chain}: {e}")
                     continue
 

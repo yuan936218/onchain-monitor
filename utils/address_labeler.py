@@ -7,6 +7,7 @@ from database.models import MonitoredAddress
 
 # In-memory cache for label lookups (cleared on each script rerun via Streamlit's execution model)
 _label_cache: dict[tuple, str | None] = {}
+_MAX_CACHE_SIZE = 10_000
 
 
 def resolve_label(address: str, chain: str = "ethereum") -> str | None:
@@ -23,6 +24,8 @@ def resolve_label(address: str, chain: str = "ethereum") -> str | None:
         MonitoredAddress.is_active == True,
     ).first()
     label = result.label if result else None
+    if len(_label_cache) >= _MAX_CACHE_SIZE:
+        _label_cache.clear()
     _label_cache[cache_key] = label
     return label
 

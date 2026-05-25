@@ -46,7 +46,7 @@ class DefiLlamaCollector(BaseCollector):
                 if abs_delta >= 1_000_000:
                     token_addr = get_tokens_for_chain("ethereum").get(token_name.upper(), "")
                     event = MintBurnEvent(
-                        tx_hash=f"defillama_{token_name}_{datetime.utcnow().timestamp()}",
+                        tx_hash=f"defillama_{token_name}_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}",
                         chain="ethereum",
                         token_symbol=token_name.upper(),
                         token_address=token_addr.lower(),

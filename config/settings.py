@@ -71,21 +71,6 @@ MONITORED_TOKENS = {
 # Deprecated alias for backward compatibility
 STABLECOIN_TOKENS = MONITORED_TOKENS
 
-STABLECOIN_ISSUERS = {
-    "ethereum": {
-        "USDT": "0xC6CDE7C39eB2f0F0095F41570af89eFC2C1Ea828",
-        "USDC": "0x55FE002aefF02F77364de339a1292923A15844B8",
-    },
-    "arbitrum": {
-        "USDT": "0xC6CDE7C39eB2f0F0095F41570af89eFC2C1Ea828",
-        "USDC": "0x55FE002aefF02F77364de339a1292923A15844B8",
-    },
-    "bsc": {
-        "USDT": "0xC6CDE7C39eB2f0F0095F41570af89eFC2C1Ea828",
-        "USDC": "0x55FE002aefF02F77364de339a1292923A15844B8",
-    },
-}
-
 CHAIN_CONFIG = {
     "ethereum": {"chain_id": "1", "explorer": "https://etherscan.io", "label": "Ethereum"},
     "arbitrum": {"chain_id": "42161", "explorer": "https://arbiscan.io", "label": "Arbitrum"},
